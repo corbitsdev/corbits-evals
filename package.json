@@ -1,0 +1,74 @@
+{
+  "name": "@corbits/evals",
+  "version": "0.1.0",
+  "description": "Eval library for agents and workflows: datasets (JSONL/CSV), task adapters (@intx/agent, inference fns), typed judges (@corbits/system-one Jev), local runner with CI reports and run-to-run diffs.",
+  "keywords": [
+    "agents",
+    "corbits",
+    "evals",
+    "evaluation",
+    "interchange"
+  ],
+  "homepage": "https://github.com/corbitsdev/corbits-evals#readme",
+  "bugs": {
+    "url": "https://github.com/corbitsdev/corbits-evals/issues"
+  },
+  "license": "LGPL-2.1-only",
+  "author": "Sawyer Cutler <sawyer@dirtroad.dev>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/corbitsdev/corbits-evals.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./workflow": {
+      "types": "./dist/workflow.d.ts",
+      "default": "./dist/workflow.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepack": "bun run build",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "test": "bun test src --pass-with-no-tests",
+    "test:e2e": "bun test e2e",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test && bun run test:e2e"
+  },
+  "dependencies": {
+    "@corbits/system-one": "^0.3.0"
+  },
+  "devDependencies": {
+    "@intx/agent": "^0.4.0",
+    "@intx/types": "^0.4.0",
+    "@intx/workflow": "^0.4.0",
+    "@types/bun": "^1.3.14",
+    "oxfmt": "^0.70.0",
+    "oxlint": "^1.85.0",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@intx/agent": "^0.4.0",
+    "@intx/workflow": "^0.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@intx/workflow": {
+      "optional": true
+    }
+  }
+}
