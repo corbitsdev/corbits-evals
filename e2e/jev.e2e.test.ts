@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { EvaluateDeps } from "@corbits/system-one";
 
-import { jevJudge } from "../src/jev.js";
+import {
+  ask,
+  EvalFailure,
+  evaluate,
+  jev,
+  type Check,
+  type Judge,
+  type Report,
+} from "../src/index.js";
 
 function stubDeps(fetch: EvaluateDeps["fetch"]): EvaluateDeps {
   return {
@@ -16,129 +24,145 @@ function stubDeps(fetch: EvaluateDeps["fetch"]): EvaluateDeps {
   };
 }
 
-function jsonFetch(body: unknown): EvaluateDeps["fetch"] {
-  return (async () =>
-    new Response(JSON.stringify(body), {
+/** Answers every POST with `answer` and records the request bodies. */
+function stubJev(answer: unknown) {
+  const bodies: Record<string, unknown>[] = [];
+  const fetch = (async (_url: string, init: RequestInit) => {
+    bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+    return new Response(JSON.stringify({ model: "jev-test", answers: { q: answer } }), {
       status: 200,
       headers: { "content-type": "application/json" },
-    })) as EvaluateDeps["fetch"];
+    });
+  }) as unknown as EvaluateDeps["fetch"];
+  return { bodies, judge: jev({ apiKey: "test-key", deps: stubDeps(fetch) }) };
 }
 
-describe("jevJudge", () => {
-  test("maps a choice decision to a passing verdict in one call", async () => {
-    let calls = 0;
-    const inner = jsonFetch({
-      model: "jev-test",
-      answers: {
-        ready: {
-          type: "choice",
-          choice: "ready",
-          probabilities: { ready: 0.9, revise: 0.1 },
-          confidence: 0.85,
-        },
-      },
+async function judged(check: Check<string, string, string>, judge: Judge) {
+  let report: Report;
+  try {
+    report = await evaluate("jev", {
+      run: (input: string) => `reply to ${input}`,
+      cases: [{ input: "refund?", expect: "yes" }],
+      checks: { judged: check },
+      judge,
     });
-    const counting = (async (...args: Parameters<typeof inner>) => {
-      calls += 1;
-      return inner(...args);
-    }) as EvaluateDeps["fetch"];
-    const deps = stubDeps(counting);
-    const judge = jevJudge({
-      questions: [
-        {
-          id: "ready",
-          type: "choice",
-          instructions: "Is the draft ready to send?",
-          criteria: { ready: "send it", revise: "needs work" },
-        },
-      ],
-      apiKey: "test-key",
-      deps,
+  } catch (cause) {
+    if (!(cause instanceof EvalFailure)) throw cause;
+    report = cause.report;
+  }
+  return { outcome: report.cases[0]?.checks["judged"] };
+}
+
+async function answered(answer: unknown, check: Check<string, string, string>) {
+  const { bodies, judge } = stubJev(answer);
+  return { ...(await judged(check, judge)), bodies };
+}
+
+describe("sentence checks", () => {
+  const question = "Is this reply ready to send to the customer?";
+
+  test("one POST per check with the run as state", async () => {
+    const { outcome, bodies } = await answered({ type: "noul", noul: 0.9 }, question);
+    expect(outcome).toEqual({ pass: true, value: 0.9, label: "yes" });
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]?.["state"]).toEqual({
+      input: "refund?",
+      output: "reply to refund?",
+      expect: "yes",
     });
-    const verdict = await judge({
-      evalCase: { id: "a", input: "refund?", expected: "yes" },
-      result: { output: "yes, refunded" },
-    });
-    expect(calls).toBe(1);
-    expect(verdict.result).toEqual({
-      kind: "category",
-      value: "ready",
-      scale: ["ready", "revise"],
-    });
-    expect(verdict.label).toBe("ready");
-    expect(verdict.confidence).toBeCloseTo(0.85, 5);
+    expect(bodies[0]?.["questions"]).toEqual({ q: { type: "noul", instructions: question } });
   });
 
-  test("transport failure fails closed, never passes", async () => {
+  test("the unsure band fails with p", async () => {
+    expect((await answered({ type: "noul", noul: 0.7 }, question)).outcome?.pass).toBe(true);
+    expect((await answered({ type: "noul", noul: 0.5 }, question)).outcome).toEqual({
+      pass: false,
+      value: 0.5,
+      label: "unsure",
+      explanation: "unsure (p=0.50)",
+    });
+    expect((await answered({ type: "noul", noul: 0.2 }, question)).outcome).toMatchObject({
+      pass: false,
+      label: "no",
+    });
+  });
+
+  test("transport failure fails closed", async () => {
     const failing = (async () => {
       throw new TypeError("boom");
-    }) as EvaluateDeps["fetch"];
-    const deps = stubDeps(failing);
-    const judge = jevJudge({
-      questions: [{ id: "ok", type: "boolean", instructions: "Is this fine?" }],
-      apiKey: "test-key",
-      deps,
-    });
-    const verdict = await judge({
-      evalCase: { id: "b", input: "x" },
-      result: { output: "y" },
-    });
-    expect(verdict.result).toEqual({ kind: "score", value: 0 });
-    expect(verdict.explanation).toContain("fallback");
+    }) as unknown as EvaluateDeps["fetch"];
+    const { outcome } = await judged(
+      question,
+      jev({ apiKey: "test-key", deps: stubDeps(failing) }),
+    );
+    expect(outcome).toMatchObject({ pass: false, value: 0 });
+    expect(outcome?.explanation).toContain("jev fallback");
   });
 });
 
-describe("jevJudge option validation", () => {
-  const question = {
-    id: "ready",
-    type: "choice",
-    instructions: "Ready?",
-    criteria: { ready: "yes", revise: "no" },
-  } as const;
-
-  test("scores for an unknown question or option throw at definition", () => {
-    expect(() => jevJudge({ questions: [question], scores: { redy: { ready: 1 } } })).toThrow(
-      '"redy"',
-    );
-    expect(() => jevJudge({ questions: [question], scores: { ready: { yes: 1 } } })).toThrow(
-      'no option "yes"',
-    );
-    expect(() => jevJudge({ questions: [] })).toThrow("at least one");
+describe("ask", () => {
+  const ready = ask("Ready to send?", {
+    options: { ready: "send it", revise: "needs work", escalate: "needs a human" },
+    pass: ["ready", "escalate"],
   });
 
-  test("graded choices become scores", async () => {
-    const judge = jevJudge({
-      questions: [question],
-      scores: { ready: { ready: 1, revise: 0.4 } },
-      apiKey: "test-key",
-      deps: stubDeps(
-        jsonFetch({
-          model: "jev-test",
-          answers: {
-            ready: {
-              type: "choice",
-              choice: "revise",
-              probabilities: { ready: 0.3, revise: 0.7 },
-              confidence: 0.7,
-            },
-          },
-        }),
+  test("a choice passes on a pass option and scores its probability", async () => {
+    const pick = (choice: string, ready: number, revise: number) => ({
+      type: "choice",
+      choice,
+      probabilities: { ready, revise, escalate: Math.round((1 - ready - revise) * 100) / 100 },
+      confidence: Math.max(ready, revise),
+    });
+    expect((await answered(pick("ready", 0.8, 0.1), ready)).outcome).toEqual({
+      pass: true,
+      value: 0.9,
+      label: "ready",
+    });
+    expect((await answered(pick("revise", 0.1, 0.8), ready)).outcome).toMatchObject({
+      pass: false,
+      label: "revise",
+      explanation: 'picked "revise"',
+    });
+    expect((await answered(pick("ready", 0.5, 0.4), ready)).outcome).toMatchObject({
+      pass: false,
+      explanation: 'unsure (p=0.50 for "ready")',
+    });
+  });
+
+  test("levels pass at the named level or above", async () => {
+    const levels = ["poor", "fair", "good", "great"];
+    const helpful = ask("How helpful is the reply?", { levels, pass: "good" });
+    const graded = (score: number, top: number) => ({
+      type: "score",
+      score,
+      legend: { "0": "poor", "1": "fair", "2": "good", "3": "great" },
+      probabilities: Object.fromEntries(
+        levels.map((_, i) => [
+          String(i),
+          i === score ? top : Math.round(((1 - top) / 3) * 100) / 100,
+        ]),
       ),
+      confidence: top,
     });
-    const verdict = await judge({ evalCase: { id: "g", input: "x" }, result: { output: "y" } });
-    expect(verdict.result).toEqual({ kind: "score", value: 0.4 });
-    expect(verdict.label).toBe("revise");
+    expect((await answered(graded(3, 0.7), helpful)).outcome).toEqual({
+      pass: true,
+      value: 1,
+      label: "great",
+    });
+    expect((await answered(graded(1, 0.7), helpful)).outcome).toMatchObject({
+      pass: false,
+      label: "fair",
+      explanation: 'graded "fair"',
+    });
+    expect((await answered(graded(2, 0.4), helpful)).outcome).toMatchObject({
+      pass: false,
+      explanation: 'unsure (p=0.40 for "good")',
+    });
   });
 
-  test("a thrown evaluate error fails closed", async () => {
-    const judge = jevJudge({
-      questions: [{ id: "ok", type: "boolean", instructions: "Fine?" }],
-      apiKey: "test-key",
-      endpoint: { type: "custom" } as never,
-      deps: stubDeps(jsonFetch({})),
-    });
-    const verdict = await judge({ evalCase: { id: "x", input: "x" }, result: { output: "y" } });
-    expect(verdict.result).toEqual({ kind: "score", value: 0 });
-    expect(verdict.explanation).toMatch(/jev (threw|fallback)/);
+  test("misconfiguration throws at definition", () => {
+    expect(() => ask("Ready?", { options: { ready: "yes" }, pass: "redy" })).toThrow('"redy"');
+    expect(() => ask("Graded?", { levels: ["only"], pass: "only" })).toThrow("2 to 10");
+    expect(() => ask(" ", { options: { a: "a" }, pass: "a" })).toThrow("needs a question");
   });
 });

@@ -1,243 +1,144 @@
-import { scoreResult, toVerdict, validateScorerResult } from "./results.js";
+import { toOutcome } from "./checks.js";
+import type { Trace } from "./runs.js";
 import { withTimeout } from "./timeout.js";
-import type {
-  CaseReport,
-  EvalCase,
-  EvalReport,
-  Scorer,
-  ScorerThreshold,
-  ScorerVerdict,
-  TaskFn,
-  TaskOutput,
-} from "./types.js";
+import type { CaseResult, Outcome, Run } from "./types.js";
 
-export type EvalThresholds = {
-  /** Per-scorer pass rules, keyed by scorer name. Unlisted scorers use the kind's default. */
-  scorers?: Record<string, ScorerThreshold>;
-  passRate?: number;
-  avgScore?: number;
-};
+export type NamedCase<I, E> = { name: string; input: I; expect?: E };
 
-export type EvalSpec<I = string, E = string> = {
-  name: string;
-  dataset: EvalCase<I, E>[];
-  task: TaskFn<I>;
-  scorers: Record<string, Scorer<I, E>>;
-  repeats?: number;
-  /** Bounds the task per attempt. On expiry the task is aborted via its signal and the case fails. */
+export type RunSpec<I, O, E> = {
+  cases: readonly NamedCase<I, E>[];
+  run: (input: I, signal: AbortSignal) => Promise<Trace<O>>;
+  checks: Record<string, (run: Run<I, O, E>) => unknown>;
+  repeats: number;
+  concurrency: number;
+  /** Bounds the run and each check per attempt. */
   timeoutMs?: number;
-  /** Bounds each scorer per attempt. Defaults to `timeoutMs`. */
-  scorerTimeoutMs?: number;
-  concurrency?: number;
-  thresholds?: EvalThresholds;
-  /** Carried onto the report, e.g. the model id, so stored runs say what they measured. */
-  metadata?: Record<string, unknown>;
 };
 
-type Limits = Pick<EvalSpec, "name" | "repeats" | "concurrency" | "timeoutMs" | "scorerTimeoutMs">;
-
-function positiveInt(spec: Limits, key: "repeats" | "concurrency"): number {
-  const raw = spec[key];
-  if (raw === undefined) return key === "repeats" ? 1 : 4;
-  if (!Number.isFinite(raw) || raw < 1) {
-    throw new Error(`eval "${spec.name}": ${key} must be a finite number >= 1`);
-  }
-  return Math.floor(raw);
+function message(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
-function positiveMs(spec: Limits, key: "timeoutMs" | "scorerTimeoutMs"): number | undefined {
-  const raw = spec[key];
-  if (raw === undefined) return undefined;
-  if (!Number.isFinite(raw) || raw <= 0) {
-    throw new Error(`eval "${spec.name}": ${key} must be a finite number > 0`);
-  }
-  return raw;
-}
-
-function validate<I, E>(spec: EvalSpec<I, E>): void {
-  if (spec.dataset.length === 0) throw new Error(`eval "${spec.name}" has an empty dataset`);
-  const names = Object.keys(spec.scorers);
-  if (names.length === 0) throw new Error(`eval "${spec.name}" has no scorers`);
-  for (const name of Object.keys(spec.thresholds?.scorers ?? {})) {
-    if (!names.includes(name)) {
-      throw new Error(`eval "${spec.name}": threshold for unknown scorer "${name}"`);
-    }
-  }
-  const ids = new Set<string>();
-  for (const evalCase of spec.dataset) {
-    if (ids.has(evalCase.id))
-      throw new Error(`eval "${spec.name}" has duplicate case id "${evalCase.id}"`);
-    ids.add(evalCase.id);
-  }
-  positiveInt(spec, "repeats");
-  positiveInt(spec, "concurrency");
-  positiveMs(spec, "timeoutMs");
-  positiveMs(spec, "scorerTimeoutMs");
-}
-
-export function defineEval<I = string, E = string>(spec: EvalSpec<I, E>): EvalSpec<I, E> {
-  validate(spec);
-  return spec;
-}
-
-export async function runEval<I = string, E = string>(spec: EvalSpec<I, E>): Promise<EvalReport> {
-  validate(spec);
-  const startedAt = new Date().toISOString();
-  const repeats = positiveInt(spec, "repeats");
-  const concurrency = positiveInt(spec, "concurrency");
-  const cases = await mapPool(spec.dataset, concurrency, (evalCase) =>
-    runCase(spec, evalCase, repeats),
-  );
-  const passed = cases.filter((c) => c.pass).length;
-  const passRate = passed / cases.length;
-  const avgScore = cases.reduce((t, c) => t + c.score, 0) / cases.length;
-  const thresholdsMet =
-    (spec.thresholds?.passRate === undefined || passRate >= spec.thresholds.passRate) &&
-    (spec.thresholds?.avgScore === undefined || avgScore >= spec.thresholds.avgScore);
-  const report: EvalReport = {
-    eval: spec.name,
-    startedAt,
-    total: cases.length,
-    passed,
-    passRate,
-    avgScore,
-    thresholdsMet,
-    cases,
-  };
-  if (spec.metadata !== undefined) report.metadata = { ...spec.metadata };
-  return report;
-}
-
-async function runTask<I>(
-  task: TaskFn<I>,
-  timeoutMs: number | undefined,
-  evalCase: Pick<EvalCase<I, unknown>, "id" | "input">,
-): Promise<TaskOutput> {
+async function runOnce<I, O, E>(
+  spec: RunSpec<I, O, E>,
+  evalCase: NamedCase<I, E>,
+): Promise<Run<I, O, E>> {
+  const { timeoutMs } = spec;
   const controller = new AbortController();
   const started = Date.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expiry = new Promise<never>((_, reject) => {
     if (timeoutMs === undefined) return;
     timer = setTimeout(() => {
-      const error = new Error(`case "${evalCase.id}" timed out after ${timeoutMs}ms`);
+      const error = new Error(`case "${evalCase.name}" timed out after ${timeoutMs}ms`);
       controller.abort(error);
       reject(error);
     }, timeoutMs);
   });
   try {
-    const result = await Promise.race([task(evalCase.input, controller.signal), expiry]);
-    return result.latencyMs === undefined ? { ...result, latencyMs: Date.now() - started } : result;
+    const trace = await Promise.race([spec.run(evalCase.input, controller.signal), expiry]);
+    const run: Run<I, O, E> = {
+      input: evalCase.input,
+      output: trace.output,
+      steps: trace.steps,
+      ms: Date.now() - started,
+    };
+    if (evalCase.expect !== undefined) run.expect = evalCase.expect;
+    return run;
   } finally {
     clearTimeout(timer);
   }
 }
 
-function failedVerdict(explanation: string): ScorerVerdict {
-  return { result: scoreResult(0), pass: false, score: 0, explanation };
-}
-
-async function runScorer<I, E>(
+async function runCheck<I, O, E>(
   name: string,
-  scorer: Scorer<I, E>,
-  args: Parameters<Scorer<I, E>>[0],
-  threshold: ScorerThreshold | undefined,
+  check: (run: Run<I, O, E>) => unknown,
+  run: Run<I, O, E>,
   timeoutMs: number | undefined,
-): Promise<ScorerVerdict> {
-  let raw: unknown;
+): Promise<Outcome> {
   try {
-    const pending = Promise.resolve(scorer(args));
-    raw =
+    const pending = Promise.resolve(check(run));
+    const raw =
       timeoutMs === undefined
         ? await pending
-        : await withTimeout(pending, timeoutMs, `scorer "${name}" timed out after ${timeoutMs}ms`);
+        : await withTimeout(pending, timeoutMs, `check "${name}" timed out after ${timeoutMs}ms`);
+    return toOutcome(name, raw);
   } catch (cause) {
-    return failedVerdict(
-      `scorer "${name}" threw: ${cause instanceof Error ? cause.message : String(cause)}`,
-    );
+    return { pass: false, value: 0, explanation: `check "${name}" threw: ${message(cause)}` };
   }
-  const checked = validateScorerResult(name, raw);
-  if (typeof checked === "string") return failedVerdict(checked);
-  return toVerdict(checked, threshold);
 }
 
-function compileAttempts(attempts: readonly ScorerVerdict[]): ScorerVerdict {
+function compileAttempts(attempts: readonly Outcome[]): Outcome {
   const first = attempts[0];
-  if (first === undefined) return failedVerdict("no attempts");
+  if (first === undefined) return { pass: false, value: 0, explanation: "no attempts" };
   if (attempts.length === 1) return first;
-  const failed = attempts.filter((v) => !v.pass);
-  // Report the attempt that decided the verdict, never a passing label on a failed scorer.
+  const failed = attempts.filter((o) => !o.pass);
+  // Report the attempt that decided the outcome, never a passing label on a failed check.
   const decider = failed[0] ?? first;
-  const compiled: ScorerVerdict = {
-    result: decider.result,
+  const compiled: Outcome = {
     pass: failed.length === 0,
-    score: attempts.reduce((t, v) => t + v.score, 0) / attempts.length,
+    value: attempts.reduce((t, o) => t + o.value, 0) / attempts.length,
     explanation: `${attempts.length - failed.length}/${attempts.length} attempts passed${
       decider.explanation === undefined ? "" : `; ${decider.explanation}`
     }`,
-    metadata: { attempts },
   };
   if (decider.label !== undefined) compiled.label = decider.label;
-  const confidences = attempts.map((v) => v.confidence).filter((c): c is number => c !== undefined);
-  if (confidences.length > 0) {
-    compiled.confidence = confidences.reduce((t, c) => t + c, 0) / confidences.length;
-  }
   return compiled;
 }
 
-async function runCase<I, E>(
-  spec: EvalSpec<I, E>,
-  evalCase: EvalCase<I, E>,
-  repeats: number,
-): Promise<CaseReport> {
+async function runCase<I, O, E>(
+  spec: RunSpec<I, O, E>,
+  evalCase: NamedCase<I, E>,
+): Promise<CaseResult<I, O, E>> {
   const started = Date.now();
-  const scorerTimeoutMs = spec.scorerTimeoutMs ?? spec.timeoutMs;
-  const thresholds = spec.thresholds?.scorers ?? {};
-  const entries = Object.entries(spec.scorers);
-  const verdicts: Record<string, ScorerVerdict[]> = {};
-  for (const [name] of entries) verdicts[name] = [];
+  const entries = Object.entries(spec.checks);
+  const attempts: Record<string, Outcome[]> = {};
+  for (const [name] of entries) attempts[name] = [];
+  let last: Run<I, O, E> | undefined;
   let error: string | undefined;
-  for (let attempt = 0; attempt < repeats; attempt += 1) {
-    let result;
+  for (let attempt = 0; attempt < spec.repeats; attempt += 1) {
     try {
-      result = await runTask(spec.task, spec.timeoutMs, evalCase);
+      last = await runOnce(spec, evalCase);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+      error = message(cause);
       break;
     }
-    const scored = await Promise.all(
-      entries.map(async ([name, scorer]) => {
-        const verdict = await runScorer(
-          name,
-          scorer,
-          { evalCase, result },
-          thresholds[name],
-          scorerTimeoutMs,
-        );
-        return [name, verdict] as const;
-      }),
+    const run = last;
+    const outcomes = await Promise.all(
+      entries.map(([name, check]) => runCheck(name, check, run, spec.timeoutMs)),
     );
-    for (const [name, verdict] of scored) verdicts[name]?.push(verdict);
+    entries.forEach(([name], i) => attempts[name]?.push(outcomes[i] as Outcome));
   }
-  const scorers: Record<string, ScorerVerdict> = {};
-  for (const [name] of entries) scorers[name] = compileAttempts(verdicts[name] ?? []);
-  const scores = Object.values(scorers).map((s) => s.score);
-  // A task error zeroes the case so partial repeats never inflate avgScore.
-  const caseScore = error !== undefined ? 0 : scores.reduce((t, s) => t + s, 0) / scores.length;
-  const report: CaseReport = {
-    id: evalCase.id,
-    pass: error === undefined && Object.values(scorers).every((s) => s.pass),
-    score: caseScore,
-    scorers,
-    latencyMs: Date.now() - started,
+  const checks: Record<string, Outcome> = {};
+  for (const [name] of entries) {
+    // A run error fails every check so partial repeats never pass a case.
+    checks[name] =
+      error === undefined
+        ? compileAttempts(attempts[name] ?? [])
+        : { pass: false, value: 0, explanation: `run failed: ${error}` };
+  }
+  const result: CaseResult<I, O, E> = {
+    name: evalCase.name,
+    input: evalCase.input,
+    steps: last?.steps ?? [],
+    ms: Date.now() - started,
+    pass: error === undefined && Object.values(checks).every((o) => o.pass),
+    checks,
   };
-  if (error !== undefined) report.error = error;
-  return report;
+  if (evalCase.expect !== undefined) result.expect = evalCase.expect;
+  if (last !== undefined) result.output = last.output;
+  if (error !== undefined) result.error = error;
+  return result;
+}
+
+export async function runCases<I, O, E>(spec: RunSpec<I, O, E>): Promise<CaseResult<I, O, E>[]> {
+  return mapPool(spec.cases, spec.concurrency, (evalCase) => runCase(spec, evalCase));
 }
 
 async function mapPool<T, R>(
   items: readonly T[],
   concurrency: number,
-  fn: (item: T, index: number) => Promise<R>,
+  fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
   const out: R[] = Array.from({ length: items.length }) as R[];
   let next = 0;
@@ -245,7 +146,7 @@ async function mapPool<T, R>(
     while (next < items.length) {
       const index = next;
       next += 1;
-      out[index] = await fn(items[index] as T, index);
+      out[index] = await fn(items[index] as T);
     }
   });
   await Promise.all(workers);

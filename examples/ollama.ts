@@ -1,14 +1,13 @@
-// Shared local-Ollama wiring for the examples. The dummy bearer works
-// around @corbits/system-one fail-closing on keyless `custom` endpoints.
-export const LOCAL_JEV = {
-  endpoint: {
-    kind: "custom" as const,
-    url: "http://localhost:11434/v1/systemone",
-    model: "clef-flash:9b",
-  },
+// Shared local-Ollama wiring for the examples. The dummy key works
+// around @corbits/system-one fail-closing on keyless custom endpoints.
+import { jev } from "../src/index.js";
+
+export const localJev = jev({
+  endpoint: "http://localhost:11434/v1/systemone",
+  model: "clef-flash:9b",
   apiKey: "ollama-local",
-  timeoutMs: 180_000,
-};
+  timeout: "180s",
+});
 
 export async function ollamaGenerate(model: string, prompt: string): Promise<string> {
   const res = await fetch("http://localhost:11434/api/generate", {

@@ -7,20 +7,20 @@ import {
   type WorkflowDefinition,
 } from "@intx/workflow";
 
-import type { TaskFn, TrajectoryStep } from "./types.js";
+import { TRACE, type Traced } from "./runs.js";
+import type { Step } from "./types.js";
 
-/** Local runs need an explicit authorize; this one allows everything and says so in its name. */
-export const allowAll: WorkflowAuthorizeFn = async () => ({
+const allowAll: WorkflowAuthorizeFn = async () => ({
   effect: "allow",
   matchingGrants: [],
   resolvedBy: null,
 });
 
-export type IntxWorkflowTaskOptions<I> = {
-  /** Runs each step. Wrapped so every call lands in the trajectory. */
+export type WorkflowRunOptions<I, O> = {
+  /** Runs each step. Wrapped so every call lands in `steps`. */
   invokeStep: StepInvoker;
-  /** What the eval treats as the run's output, read from the completed run. */
-  output: (run: RunResult) => string;
+  /** The run's output. Defaults to the output of the last listed step. */
+  output?: (run: RunResult) => O;
   /** Maps the case input to the trigger payload. Defaults to the input itself. */
   trigger?: (input: I) => unknown;
   authorize?: WorkflowAuthorizeFn;
@@ -32,48 +32,53 @@ export type IntxWorkflowTaskOptions<I> = {
 };
 
 /**
- * Evaluate a whole workflow as one task. Each step invocation is recorded
- * as a `TrajectoryStep` of kind `step` named after its agent, so trajectory
- * scorers (`toolCallF1` over step names, ordering checks) work unchanged.
+ * Run a whole workflow per case. A definition alone cannot run locally:
+ * `invokeStep` decides how each step's agent answers, so it is required.
+ * Each step invocation is a step of kind `step` named after its agent.
  * A run that does not reach `completed` throws, which fails the case.
  * The case's abort signal cancels the run.
  */
-export function fromIntxWorkflow<I = string>(
+export function workflow<I = unknown, O = unknown>(
   definition: WorkflowDefinition,
-  options: IntxWorkflowTaskOptions<I>,
-): TaskFn<I> {
-  return async (input, signal) => {
-    if (signal?.aborted) throw new Error("eval task aborted before workflow start");
-    const trajectory: TrajectoryStep[] = [];
-    const invokeStep: StepInvoker = async (request) => {
-      const started = Date.now();
-      const step: TrajectoryStep = { name: request.agent.id, kind: "step", input: request.input };
-      trajectory.push(step);
-      const result = await options.invokeStep(request);
-      step.latencyMs = Date.now() - started;
-      step.output = "output" in result ? result.output : { suspended: result.suspend.kind };
-      return result;
-    };
-    const started = Date.now();
-    const run = runLocal(definition, {
-      ...options.runOptions,
-      authorize: options.authorize ?? allowAll,
-      hasUpstreamSignalResolver: true,
-      triggerPayload: options.trigger === undefined ? input : options.trigger(input),
-      invokeStep,
-    });
-    const onAbort = () => {
-      void run.cancel("supervisor-operator", "eval case aborted");
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    try {
-      const finished = await run.complete;
-      if (finished.terminalStatus !== "completed") {
-        throw new Error(`workflow "${definition.id}" ended ${finished.terminalStatus}`);
+  options: WorkflowRunOptions<I, O>,
+): Traced<I, O> {
+  const last = definition.stepOrder.at(-1);
+  const output =
+    options.output ??
+    ((run: RunResult) => (last === undefined ? undefined : run.outputs[last]) as O);
+  return {
+    [TRACE]: async (input, signal) => {
+      if (signal.aborted) throw new Error("run aborted before workflow start");
+      const steps: Step[] = [];
+      const invokeStep: StepInvoker = async (request) => {
+        const started = Date.now();
+        const step: Step = { name: request.agent.id, kind: "step", input: request.input };
+        steps.push(step);
+        const result = await options.invokeStep(request);
+        step.ms = Date.now() - started;
+        step.output = "output" in result ? result.output : { suspended: result.suspend.kind };
+        return result;
+      };
+      const run = runLocal(definition, {
+        ...options.runOptions,
+        authorize: options.authorize ?? allowAll,
+        hasUpstreamSignalResolver: true,
+        triggerPayload: options.trigger === undefined ? input : options.trigger(input),
+        invokeStep,
+      });
+      const onAbort = () => {
+        void run.cancel("supervisor-operator", "eval case aborted");
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      try {
+        const finished = await run.complete;
+        if (finished.terminalStatus !== "completed") {
+          throw new Error(`workflow "${definition.id}" ended ${finished.terminalStatus}`);
+        }
+        return { output: output(finished), steps };
+      } finally {
+        signal.removeEventListener("abort", onAbort);
       }
-      return { output: options.output(finished), trajectory, latencyMs: Date.now() - started };
-    } finally {
-      signal?.removeEventListener("abort", onAbort);
-    }
+    },
   };
 }
