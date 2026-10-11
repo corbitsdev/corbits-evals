@@ -19,7 +19,9 @@ export function exactMatch(): Scorer<string, string> {
 }
 
 /** F1 over `tool` and `step` names as a score. No trajectory is 0: silent tools must not pass. */
-export function toolCallF1(expectedTools: readonly string[]): Scorer {
+export function toolCallF1<I = unknown, E = unknown>(
+  expectedTools: readonly string[],
+): Scorer<I, E> {
   const expected = [...expectedTools].sort();
   return ({ kase, result }) => {
     if (result.trajectory === undefined) {
@@ -53,7 +55,7 @@ export function toolCallF1(expectedTools: readonly string[]): Scorer {
 }
 
 /** Boolean result: the task finished within `maxMs`. */
-export function latencyBudget(maxMs: number): Scorer {
+export function latencyBudget<I = unknown, E = unknown>(maxMs: number): Scorer<I, E> {
   return ({ kase, result }) => {
     const latencyMs = result.latencyMs;
     if (latencyMs === undefined) {
