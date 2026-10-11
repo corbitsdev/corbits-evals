@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ConversationTurn } from "@intx/types/runtime";
 
 import { agentJudge, senderFromIntxAgent } from "../src/agentJudge.js";
-import { success } from "../src/results.js";
+import { booleanResult } from "../src/results.js";
 
 const turn = {} as ConversationTurn;
 
@@ -18,13 +18,13 @@ describe("agentJudge", () => {
     const judge = agentJudge({
       instructions: "Reply PASS or FAIL.",
       send: senderFromIntxAgent(fake),
-      parse: (reply) => ({ result: success(reply.startsWith("PASS")), explanation: reply }),
+      parse: (reply) => ({ result: booleanResult(reply.startsWith("PASS")), explanation: reply }),
     });
     const verdict = await judge({
-      kase: { id: "a", input: "refund?", expected: "yes" },
+      evalCase: { id: "a", input: "refund?", expected: "yes" },
       result: { output: "yes" },
     });
-    expect(verdict.result).toEqual(success(true));
+    expect(verdict.result).toEqual(booleanResult(true));
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain("<input>");
     expect(prompts[0]).toContain("refund?");
@@ -36,9 +36,9 @@ describe("agentJudge", () => {
       send: async () => {
         throw new Error("no route");
       },
-      parse: () => ({ result: success(true) }),
+      parse: () => ({ result: booleanResult(true) }),
     });
-    const verdict = await judge({ kase: { id: "b", input: "x" }, result: { output: "y" } });
+    const verdict = await judge({ evalCase: { id: "b", input: "x" }, result: { output: "y" } });
     expect(verdict.result).toEqual({ kind: "score", value: 0 });
     expect(verdict.explanation).toContain("no route");
   });
@@ -47,10 +47,10 @@ describe("agentJudge", () => {
     const judge = agentJudge({
       instructions: "x",
       send: () => new Promise(() => {}),
-      parse: () => ({ result: success(true) }),
+      parse: () => ({ result: booleanResult(true) }),
       timeoutMs: 30,
     });
-    const verdict = await judge({ kase: { id: "c", input: "x" }, result: { output: "y" } });
+    const verdict = await judge({ evalCase: { id: "c", input: "x" }, result: { output: "y" } });
     expect(verdict.explanation).toContain("timed out");
   });
 });

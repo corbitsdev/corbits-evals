@@ -85,9 +85,9 @@ const factuality = jevJudge<string, string>({
     },
   ],
   scores: { fact: { A: 0.4, B: 0.6, C: 1, D: 0, E: 1 } },
-  state: (kase, result) => ({
-    question: kase.input,
-    expert: kase.expected,
+  state: (evalCase, result) => ({
+    question: evalCase.input,
+    expert: evalCase.expected,
     submission: result.output,
   }),
   ...LOCAL_JEV,

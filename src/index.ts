@@ -14,6 +14,7 @@ export type {
 export { agentJudge, senderFromIntxAgent, type AgentJudgeOptions } from "./agentJudge.js";
 export { fromCsv, fromJsonl, parseCsv, parseJsonl } from "./datasets.js";
 export {
+  defaultJevState,
   jevJudge,
   type Decision,
   type EndpointConfig,
@@ -30,7 +31,7 @@ export {
   toMarkdown,
   type ReportDiff,
 } from "./reports.js";
-export { category, describe, meets, normalize, score, success } from "./results.js";
+export { booleanResult, categoryResult, scoreResult } from "./results.js";
 export { defineEval, runEval, type EvalSpec, type EvalThresholds } from "./runner.js";
 export {
   combineAll,
@@ -40,4 +41,4 @@ export {
   latencyBudget,
   toolCallF1,
 } from "./scorers.js";
-export { defaultState, fromFunction, fromIntxAgent } from "./tasks.js";
+export { fromFunction, fromIntxAgent } from "./tasks.js";

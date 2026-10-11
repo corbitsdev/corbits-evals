@@ -1,14 +1,14 @@
 import type { Result, ScorerResult, ScorerThreshold, ScorerVerdict } from "./types.js";
 
-export function score(value: number): Result {
+export function scoreResult(value: number): Result {
   return { kind: "score", value };
 }
 
-export function success(value: boolean): Result {
+export function booleanResult(value: boolean): Result {
   return { kind: "boolean", value };
 }
 
-export function category(value: string, scale?: readonly string[]): Result {
+export function categoryResult(value: string, scale?: readonly string[]): Result {
   return scale === undefined ? { kind: "category", value } : { kind: "category", value, scale };
 }
 

@@ -4,12 +4,14 @@ type Row = Record<string, unknown>;
 
 function rejectDuplicates(cases: EvalCase<unknown, unknown>[], source: string): void {
   const seen = new Map<string, number>();
-  cases.forEach((kase, i) => {
-    const first = seen.get(kase.id);
+  cases.forEach((evalCase, i) => {
+    const first = seen.get(evalCase.id);
     if (first !== undefined) {
-      throw new Error(`${source}: duplicate case id "${kase.id}" (rows ${first + 1} and ${i + 1})`);
+      throw new Error(
+        `${source}: duplicate case id "${evalCase.id}" (rows ${first + 1} and ${i + 1})`,
+      );
     }
-    seen.set(kase.id, i);
+    seen.set(evalCase.id, i);
   });
 }
 
@@ -19,16 +21,16 @@ function toCase(row: Row, source: string, line: number): EvalCase<unknown, unkno
     throw new Error(`${source}:${line}: "id" must be a non-empty string`);
   }
   if (!("input" in row)) throw new Error(`${source}:${line}: missing "input"`);
-  const kase: EvalCase<unknown, unknown> = { id, input: row["input"] };
-  if (row["expected"] !== undefined) kase.expected = row["expected"];
+  const evalCase: EvalCase<unknown, unknown> = { id, input: row["input"] };
+  if (row["expected"] !== undefined) evalCase.expected = row["expected"];
   const metadata = row["metadata"];
   if (metadata !== undefined) {
     if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
       throw new Error(`${source}:${line}: "metadata" must be an object`);
     }
-    kase.metadata = metadata as Record<string, unknown>;
+    evalCase.metadata = metadata as Record<string, unknown>;
   }
-  return kase;
+  return evalCase;
 }
 
 /** One JSON object per line. Blank lines are skipped. */

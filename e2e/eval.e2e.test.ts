@@ -4,7 +4,7 @@ import { defineEval, runEval } from "../src/runner.js";
 import { diffReports, parseReport, toJson, toJUnit, toMarkdown } from "../src/reports.js";
 import type { Scorer } from "../src/types.js";
 import { combineAll, exactMatch, latencyBudget } from "../src/scorers.js";
-import { score, success } from "../src/results.js";
+import { booleanResult, scoreResult } from "../src/results.js";
 import { fromFunction } from "../src/tasks.js";
 
 const upper = fromFunction((input: string) => input.toUpperCase());
@@ -96,11 +96,11 @@ describe("runEval hardening", () => {
         timeoutMs: 50,
       }),
     );
-    const kase = report.cases[0];
-    expect(kase?.pass).toBe(false);
-    expect(kase?.error).toBeUndefined();
-    expect(kase?.scorers["exact"]?.pass).toBe(true);
-    expect(kase?.scorers["stuck"]?.explanation).toContain("timed out");
+    const caseReport = report.cases[0];
+    expect(caseReport?.pass).toBe(false);
+    expect(caseReport?.error).toBeUndefined();
+    expect(caseReport?.scorers["exact"]?.pass).toBe(true);
+    expect(caseReport?.scorers["stuck"]?.explanation).toContain("timed out");
   });
 
   test("a throwing scorer fails itself, not its siblings", async () => {
@@ -128,7 +128,7 @@ describe("runEval hardening", () => {
         name: "nan",
         dataset: [{ id: "a", input: "hi", expected: "HI" }],
         task: upper,
-        scorers: { weird: () => ({ result: score(Number.NaN) }) },
+        scorers: { weird: () => ({ result: scoreResult(Number.NaN) }) },
       }),
     );
     expect(report.cases[0]?.pass).toBe(false);
@@ -136,7 +136,7 @@ describe("runEval hardening", () => {
   });
 
   test("invalid or throwing combineAll members fail the composite closed", async () => {
-    const invalid: Scorer = () => ({ result: score(7) });
+    const invalid: Scorer = () => ({ result: scoreResult(7) });
     const throwing: Scorer = () => {
       throw new Error("kaput");
     };
@@ -209,8 +209,8 @@ describe("runEval hardening", () => {
           flaky: () => {
             calls += 1;
             return calls === 1
-              ? { result: success(true), label: "ready", explanation: "fine" }
-              : { result: success(false), label: "revise", explanation: "bad" };
+              ? { result: booleanResult(true), label: "ready", explanation: "fine" }
+              : { result: booleanResult(false), label: "revise", explanation: "bad" };
           },
         },
         repeats: 2,
@@ -314,8 +314,11 @@ describe("toJson / parseReport / diffReports", () => {
     expect(() => parseReport(JSON.stringify({ ...json, cases: [{ id: "a" }] }))).toThrow(
       "cases[0]",
     );
-    const [kase] = report.cases;
-    const badLabel = { ...kase, scorers: { exact: { ...kase!.scorers["exact"], label: 1 } } };
+    const [caseReport] = report.cases;
+    const badLabel = {
+      ...caseReport,
+      scorers: { exact: { ...caseReport!.scorers["exact"], label: 1 } },
+    };
     expect(() => parseReport(JSON.stringify({ ...json, cases: [badLabel] }))).toThrow(
       'scorer "exact": "label" must be a string',
     );
@@ -335,7 +338,11 @@ describe("author-owned thresholds", () => {
       name: "thr",
       dataset: [{ id: "a", input: "hi", expected: "HELLO" }],
       task: upper,
-      scorers: { risk, ok: () => ({ result: success(true) }), cov: () => ({ result: score(0.6) }) },
+      scorers: {
+        risk,
+        ok: () => ({ result: booleanResult(true) }),
+        cov: () => ({ result: scoreResult(0.6) }),
+      },
     };
     const strict = await runEval(defineEval(base));
     expect(strict.cases[0]?.scorers["risk"]?.pass).toBe(false);
