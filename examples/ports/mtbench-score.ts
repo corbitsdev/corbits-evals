@@ -1,7 +1,7 @@
-// 1-10 helpfulness as a Jev score question. Rank order of four answers
-// is the ground truth. Run: bun examples/ports/mtbench-score.ts
-import { defineEval, jevJudge, runEval, toMarkdown } from "../../src/index.js";
-import { LOCAL_JEV } from "../ollama.js";
+// 1-10 helpfulness as Jev levels. Rank order of four answers is the
+// ground truth. Run: bun examples/ports/mtbench-score.ts
+import { ask, evaluate } from "../../src/index.js";
+import { localJev } from "../ollama.js";
 
 const LEVELS = [
   "1: useless or wrong",
@@ -25,46 +25,32 @@ const CASES: { id: string; rank: number; answer: string }[] = [
   { id: "wrong", rank: 4, answer: "The capital of France is Lyon, a lovely city." },
 ];
 
-const helpfulness = jevJudge<string, string>({
-  questions: [
-    {
-      id: "help",
-      type: "score",
-      instructions:
-        "Rate the answer's helpfulness and correctness. A bare fragment with no explanation caps at 5. A complete correct answer with supporting detail scores 8+. A wrong answer scores 1-2.",
-      criteria: LEVELS,
-    },
-  ],
-  state: (evalCase, result) => ({ question: QUESTION, answer: result.output }),
-  ...LOCAL_JEV,
-});
-
-const spec = defineEval({
-  name: "port-mtbench-score",
-  dataset: CASES.map((c) => ({ id: c.id, input: c.id, expected: "ranked answer" })),
-  task: async (input) => {
-    const found = CASES.find((c) => c.id === String(input));
-    if (!found) throw new Error("unknown case");
-    return { output: found.answer };
+const report = await evaluate("port-mtbench-score", {
+  run: (input: { question: string; id: string }) =>
+    CASES.find((c) => c.id === input.id)?.answer ?? "",
+  cases: CASES.map((c) => ({ name: c.id, input: { question: QUESTION, id: c.id } })),
+  checks: {
+    jev_helpfulness: ask(
+      "Rate the output's helpfulness and correctness for the question. A bare fragment with no explanation caps at 5. A complete correct answer with supporting detail scores 8+. A wrong answer scores 1-2.",
+      { levels: LEVELS, pass: "6: good" },
+    ),
   },
-  scorers: { jev_helpfulness: helpfulness },
-  thresholds: { scorers: { jev_helpfulness: { min: 0.5 } } },
+  passRate: 0,
+  judge: localJev,
 });
+console.log(report.markdown());
 
-const report = await runEval(spec);
-console.log(toMarkdown(report));
-
-const ranked = [...report.cases]
-  .sort(
-    (a, b) =>
-      (b.scorers["jev_helpfulness"]?.score ?? -1) - (a.scorers["jev_helpfulness"]?.score ?? -1),
-  )
-  .map((c) => `${c.id}=${(c.scorers["jev_helpfulness"]?.score ?? -1).toFixed(2)}`);
+const score = (name: string) =>
+  report.cases.find((c) => c.name === name)?.checks["jev_helpfulness"]?.value ?? -1;
+const ranked = CASES.map((c) => c.id).sort((a, b) => score(b) - score(a));
 const truthOrder = [...CASES].sort((a, b) => a.rank - b.rank).map((c) => c.id);
-console.log("\nrank by Jev score:", ranked.join(" > "));
+console.log(
+  "\nrank by Jev score:",
+  ranked.map((id) => `${id}=${score(id).toFixed(2)}`).join(" > "),
+);
 console.log("truth rank order:", truthOrder.join(" > "));
 console.log(
-  ranked.map((r) => r.split("=")[0]).join(",") === truthOrder.join(",")
+  ranked.join(",") === truthOrder.join(",")
     ? "rank order MATCHES ground truth"
     : "rank order DIFFERS from ground truth",
 );

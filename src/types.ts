@@ -1,85 +1,73 @@
-export type TrajectoryStep = {
+export type Step = {
   name: string;
   kind: "llm" | "tool" | "step";
   input?: unknown;
   output?: unknown;
-  latencyMs?: number;
+  ms?: number;
 };
 
-export type TaskOutput = {
-  output: string;
-  trajectory?: TrajectoryStep[];
-  /** Task wall time. The runner fills it in when the task does not. */
-  latencyMs?: number;
-};
-
-export type TaskFn<I = string> = (input: I, signal?: AbortSignal) => Promise<TaskOutput>;
-
-export type EvalCase<I = string, E = string> = {
-  id: string;
+export type Case<I = unknown, E = unknown> = {
+  /** Keys the case in reports and baselines. Defaults to the input. */
+  name?: string;
   input: I;
-  expected?: E;
-  metadata?: Record<string, unknown>;
+  expect?: E;
 };
 
-/**
- * What a scorer measured. Scorers never decide pass/fail; the eval author
- * does, through `EvalThresholds.scorers`.
- */
-export type Result =
-  | { kind: "score"; value: number }
-  | { kind: "boolean"; value: boolean }
-  | { kind: "category"; value: string; scale?: readonly string[] };
+/** One run of one case, as every check sees it. */
+export type Run<I = unknown, O = unknown, E = unknown> = {
+  input: I;
+  output: O;
+  expect?: E;
+  steps: Step[];
+  ms: number;
+};
 
-export type ScorerResult = {
-  result: Result;
-  label?: string;
+/** A check's answer for one case. `value` is 0..1. */
+export type Outcome = {
+  pass: boolean;
+  value: number;
   explanation?: string;
-  /** Absent when the source reports none (e.g. noul); never read it unconditionally. */
-  confidence?: number;
-  metadata?: Record<string, unknown>;
+  /** What a Jev check picked. */
+  label?: string;
 };
 
-export type Scorer<I = string, E = string> = (args: {
-  evalCase: EvalCase<I, E>;
-  result: TaskOutput;
-}) => Promise<ScorerResult> | ScorerResult;
+/** A number must be 0..1 and passes only at 1. */
+export type CheckValue = boolean | number | Outcome;
 
-/** Pass rule for one scorer. The variant must match the scorer's `Result.kind`. */
-export type ScorerThreshold =
-  | { min: number }
-  | { expect: boolean }
-  | { allow: readonly string[] }
-  | { atLeast: string };
+export type CheckFn<I = unknown, O = unknown, E = unknown> = (
+  run: Run<I, O, E>,
+) => CheckValue | Promise<CheckValue>;
 
-/** Runner output per scorer: the scorer's result plus the author's verdict on it. */
-export type ScorerVerdict = ScorerResult & {
+export type CaseResult<I = unknown, O = unknown, E = unknown> = {
+  name: string;
+  input: I;
+  expect?: E;
+  output?: O;
+  steps: Step[];
+  /** Whole case: every attempt's run plus checks. */
+  ms: number;
   pass: boolean;
-  /** `Result` normalized to 0..1 for aggregation. */
-  score: number;
-};
-
-export type CaseReport = {
-  id: string;
-  pass: boolean;
-  score: number;
-  scorers: Record<string, ScorerVerdict>;
-  /** Whole case: every attempt's task plus scoring. Not the task latency (see TaskOutput.latencyMs). */
-  latencyMs: number;
-  /** Set when the task threw or timed out. Scorer failures live in `scorers`. */
+  /** Set when the run threw or timed out; every check then fails. */
   error?: string;
+  checks: Record<string, Outcome>;
 };
 
-export type EvalReport = {
-  eval: string;
-  /** ISO time the run started. */
-  startedAt: string;
-  /** Caller-supplied run context from `EvalSpec.metadata`, e.g. the model id. */
-  metadata?: Record<string, unknown>;
+/** A case × check whose pass flipped against the baseline. */
+export type Change = { case: string; check: string; change: "fixed" | "broke" };
+
+export type Report<I = unknown, O = unknown, E = unknown> = {
+  name: string;
+  about?: Record<string, unknown>;
+  /** Pass rate met and nothing broke against the baseline. */
+  ok: boolean;
   total: number;
   passed: number;
   passRate: number;
-  avgScore: number;
-  thresholdsMet: boolean;
-  cases: CaseReport[];
+  checks: Record<string, { passed: number; total: number }>;
+  cases: CaseResult<I, O, E>[];
+  /** Present when a baseline existed before this run. */
+  changes?: Change[];
+  markdown(): string;
+  /** Writes the run in baseline form. */
+  save(path: string): Promise<void>;
 };

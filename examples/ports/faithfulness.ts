@@ -1,9 +1,9 @@
 // Claim-checking (extract claims, verify each against context) as one
-// Jev choice.
-// keywordCoverage passes the vocab-reuse trap; the judge must catch it.
-// Run: bun examples/ports/faithfulness.ts
-import { defineEval, jevJudge, keywordCoverage, runEval, toMarkdown } from "../../src/index.js";
-import { LOCAL_JEV } from "../ollama.js";
+// Jev choice. Keyword coverage passes the vocab-reuse trap; the judge
+// must catch it. Run: bun examples/ports/faithfulness.ts
+import { ask, evaluate } from "../../src/index.js";
+import { localJev } from "../ollama.js";
+import { coverage } from "../words.js";
 
 const CRITERIA = {
   supported: "every claim in the answer is supported by the context",
@@ -52,48 +52,34 @@ const CASES: { id: string; context: string; answer: string; truth: Truth }[] = [
   },
 ];
 
-const faithfulness = jevJudge<string, string>({
-  questions: [
-    {
-      id: "faith",
-      type: "choice",
-      instructions: "Is every claim in the answer grounded in the context? Pick one option.",
-      criteria: CRITERIA,
-    },
-  ],
-  state: (evalCase, result) => ({ context: evalCase.expected, answer: result.output }),
-  ...LOCAL_JEV,
-});
-
-const spec = defineEval({
-  name: "port-faithfulness",
-  dataset: CASES.map((c) => ({ id: c.id, input: c.id, expected: c.context })),
-  task: async (input) => {
-    const found = CASES.find((c) => c.id === String(input));
-    if (!found) throw new Error("unknown case");
-    return { output: found.answer };
+// The context goes in as the input, so Jev sees it next to the answer.
+const report = await evaluate("port-faithfulness", {
+  run: (context: string) => CASES.find((c) => c.context === context)?.answer ?? "",
+  cases: CASES.map((c) => ({ name: c.id, input: c.context })),
+  checks: {
+    baseline_coverage: (r) => coverage(r.input, r.output) >= 0.5,
+    jev_faithfulness: ask(
+      "Is every claim in the output grounded in the context given as input? Pick one option.",
+      { options: CRITERIA, pass: "supported" },
+    ),
   },
-  scorers: { baseline_coverage: keywordCoverage(), jev_faithfulness: faithfulness },
-  thresholds: {
-    scorers: { baseline_coverage: { min: 0.5 }, jev_faithfulness: { allow: ["supported"] } },
-  },
+  passRate: 0,
+  judge: localJev,
 });
-
-const report = await runEval(spec);
-console.log(toMarkdown(report));
+console.log(report.markdown());
 
 let baselineAgree = 0;
 let jevAgree = 0;
 let jevOption = 0;
 for (const c of report.cases) {
-  const truth = CASES.find((t) => t.id === c.id)?.truth;
+  const truth = CASES.find((t) => t.id === c.name)?.truth;
   if (!truth) continue;
-  if ((c.scorers["baseline_coverage"]?.pass ?? false) === truth.pass) baselineAgree += 1;
-  const jv = c.scorers["jev_faithfulness"];
+  if ((c.checks["baseline_coverage"]?.pass ?? false) === truth.pass) baselineAgree += 1;
+  const jv = c.checks["jev_faithfulness"];
   if ((jv?.pass ?? false) === truth.pass) jevAgree += 1;
   if (jv?.label === truth.option) jevOption += 1;
 }
 console.log(`\nagreement with ground truth over ${CASES.length} cases:`);
-console.log(`- baseline keywordCoverage pass/fail: ${baselineAgree}/${CASES.length}`);
-console.log(`- jev faithfulness pass/fail:         ${jevAgree}/${CASES.length}`);
-console.log(`- jev exact option:                   ${jevOption}/${CASES.length}`);
+console.log(`- baseline keyword coverage pass/fail: ${baselineAgree}/${CASES.length}`);
+console.log(`- jev faithfulness pass/fail:          ${jevAgree}/${CASES.length}`);
+console.log(`- jev exact option:                    ${jevOption}/${CASES.length}`);
