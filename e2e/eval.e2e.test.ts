@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { defineEval, runEval } from "../src/runner.js";
 import { diffReports, toJson, toJUnit, toMarkdown } from "../src/reports.js";
 import type { EvalReport, Scorer } from "../src/types.js";
-import { exactMatch, latencyBudget } from "../src/scorers.js";
+import { combineAll, exactMatch, latencyBudget } from "../src/scorers.js";
 import { score, success } from "../src/results.js";
 import { fromFunction } from "../src/tasks.js";
 
@@ -133,6 +133,36 @@ describe("runEval hardening", () => {
     );
     expect(report.cases[0]?.pass).toBe(false);
     expect(report.avgScore).toBe(0);
+  });
+
+  test("invalid or throwing combineAll members fail the composite closed", async () => {
+    const invalid: Scorer = () => ({ result: score(7) });
+    const throwing: Scorer = () => {
+      throw new Error("kaput");
+    };
+    const report = await runEval(
+      defineEval({
+        name: "composite",
+        dataset: [{ id: "a", input: "hi", expected: "HI" }],
+        task: upper,
+        scorers: {
+          valid: combineAll<string, string>([exactMatch(), exactMatch()]),
+          invalid: combineAll<string, string>([exactMatch(), invalid]),
+          throwing: combineAll<string, string>([exactMatch(), throwing]),
+          nested: combineAll<string, string>([exactMatch(), combineAll([exactMatch(), invalid])]),
+        },
+        thresholds: { scorers: { invalid: { min: 0 }, nested: { min: 0 } } },
+      }),
+    );
+    const scorers = report.cases[0]?.scorers;
+    expect(scorers?.["valid"]).toMatchObject({ pass: true, score: 1 });
+    for (const name of ["invalid", "throwing", "nested"]) {
+      expect(scorers?.[name]).toMatchObject({ pass: false, score: 0 });
+    }
+    expect(scorers?.["invalid"]?.explanation).toContain(
+      'scorer "combineAll[1]" returned an invalid result',
+    );
+    expect(scorers?.["throwing"]?.explanation).toContain('scorer "combineAll[1]" threw: kaput');
   });
 
   test("the task aborts on timeout and fromFunction stamps latency", async () => {
