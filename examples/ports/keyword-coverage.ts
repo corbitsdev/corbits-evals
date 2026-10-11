@@ -43,7 +43,7 @@ const report = await evaluate("port-keyword-coverage", {
     baseline_exact: matches(),
     port_coverage: (r) => coverage(r.expect ?? "", r.output) >= 0.5,
   },
-  passRate: 0,
+  allow: { baseline_exact: CASES.length, port_coverage: CASES.length },
 });
 console.log(report.markdown());
 

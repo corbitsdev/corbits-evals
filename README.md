@@ -1,7 +1,7 @@
 # @corbits/evals
 
 Evals for agents and workflows in one call: run each case, check it,
-print a summary, fail when it gets worse.
+print a summary, fail when a check misses or drops more than allowed.
 
 ## Install
 
@@ -24,7 +24,8 @@ const report = await evaluate("refund-agent", {
     readyToSend: "Is this reply ready to send to the customer?",
     fast: under({ ms: 5_000 }),
   },
-  baseline: "evals/refund.baseline.json",
+  allow: { readyToSend: 1 },
+  compare: "evals/refund.last.json",
   about: { model: "qwen2.5:7b" },
 });
 console.log(report.markdown());
@@ -87,27 +88,47 @@ attempt passes. `concurrency` (default 4) bounds cases in flight;
 
 ## Cases
 
-An array of `{ name?, input, expect? }`, or the path of a JSONL file of
-the same objects. `name` keys the case in reports and baselines and
-defaults to the input.
+An array of `{ name?, input, expect?, must?, skip? }`, or the path of a
+JSONL file of the same objects. `name` keys the case in reports and
+compared runs and defaults to the input.
 
-## Gate and baseline
+## Passing
 
-`evaluate` prints per check passed/total and rejects with `EvalFailure`
-when the eval fails, so a script exits non-zero in CI. Its message lists
-the failed case × checks; `.report` holds every result. Without a
-baseline, every case must pass unless `passRate` says otherwise.
+```ts
+await evaluate("judge", {
+  run,
+  cases, // a case can say { must: ["tests"], skip: ["docs"] }
+  checks,
+  compare: "evals/judge.last.json", // read: measure drops against it
+  save: "evals/judge.last.json", // write: store this run, pass or fail
+  allow: {
+    tests: { miss: 1, drop: 0 },
+    docs: { miss: 5, drop: 2 },
+    focused: 3, // { miss: 3 }
+  },
+});
+```
 
-With `baseline`, the stored run is compared case × check: anything that
-passed before and fails now, or a pass rate below `passRate` (default:
-the stored rate), fails the eval; flips are printed as `fixed` / `broke`.
-Added or removed cases count toward the rate only, so update the baseline
-after changing cases. A missing baseline fails.
-`CORBITS_EVALS_UPDATE=1` (or `update: true`) writes it instead of
-comparing, failing only on an explicit `passRate`. Baselines store each
-case × check pass and value plus `about`, with no times, so they diff
-cleanly in git. `report.save(path)` writes the same form. `quiet: true`
-skips the summary.
+Per check, `allow` sets (default 0):
+
+- **miss**: cases that may fail.
+- **drop**: cases that passed in the `compare` run and may fail now. A
+  fixed case does not offset a broken one.
+
+A case's `must` checks must pass whatever `allow` says; its `skip` checks
+are not run or counted.
+
+`evaluate` prints each check's passes, misses and drops, and rejects with
+`EvalFailure` naming the limit each failing check broke and its failed
+cases; `.report` holds every result.
+
+A stored run is each case × check pass and value plus `about`, no times.
+`compare` only reads; a missing file skips drops. `save` only writes, on
+every run. One path for both compares with the last run, then replaces
+it. `compare` also takes a report from an earlier `evaluate` of the same
+eval, with no file: `evaluate(name, { ...options, compare: before })`.
+Flips print as `fixed` / `broke`, new and gone cases as `added` /
+`removed`. `quiet: true` skips the summary.
 
 ## Peers
 

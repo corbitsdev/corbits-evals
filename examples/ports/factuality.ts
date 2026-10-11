@@ -84,7 +84,7 @@ const report = await evaluate("port-factuality", {
       { options: CRITERIA, pass: ["A", "B", "C", "E"] },
     ),
   },
-  passRate: 0,
+  allow: { baseline_exact: CASES.length, jev_factuality: CASES.length },
   judge: localJev,
 });
 console.log(report.markdown());

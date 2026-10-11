@@ -27,7 +27,7 @@ const report = await evaluate("local-jev-support", {
       },
     ),
   },
-  passRate: 0.5,
+  allow: { ready: 2 },
   judge: localJev,
 });
 console.log(report.markdown());
