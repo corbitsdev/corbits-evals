@@ -72,6 +72,10 @@ export type CaseReport = {
 
 export type EvalReport = {
   eval: string;
+  /** ISO time the run started. */
+  startedAt: string;
+  /** Caller-supplied run context from `EvalSpec.metadata`, e.g. the model id. */
+  metadata?: Record<string, unknown>;
   total: number;
   passed: number;
   passRate: number;
