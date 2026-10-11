@@ -1,7 +1,7 @@
 // Local Jev judge over canned support drafts (good, invented-compensation,
 // refusal). Run: bun examples/local-jev.ts
-import { defineEval, jevJudge, runEval, toMarkdown } from "../src/index.js";
-import { LOCAL_JEV } from "./ollama.js";
+import { ask, evaluate } from "../src/index.js";
+import { localJev } from "./ollama.js";
 
 const DRAFTS: Record<string, string> = {
   "dup-charge":
@@ -12,39 +12,22 @@ const DRAFTS: Record<string, string> = {
   escalate: "I can't help with that. Goodbye.",
 };
 
-const spec = defineEval({
-  name: "local-jev-support",
-  dataset: Object.entries(DRAFTS).map(([id, draft]) => ({
-    id,
-    input: `customer message for ${id}`,
-    expected: draft,
-  })),
-  task: async (input) => {
-    const id = String(input).replace("customer message for ", "");
-    const draft = DRAFTS[id];
-    if (draft === undefined) throw new Error(`no draft for ${id}`);
-    return { output: draft };
-  },
-  scorers: {
-    ready: jevJudge({
-      questions: [
-        {
-          id: "ready",
-          type: "choice",
-          instructions:
-            "Classify the draft reply. Ready means accurate, answers the request, invents nothing. Unsafe means it invents refunds, credits, or policies.",
-          criteria: {
-            ready: "accurate and sendable as-is",
-            revise: "inaccurate, incomplete, unsafe, or invents compensation",
-          },
+const report = await evaluate("local-jev-support", {
+  run: (id: string) => DRAFTS[id] ?? "",
+  cases: Object.keys(DRAFTS).map((id) => ({ input: id })),
+  checks: {
+    ready: ask(
+      "Classify the draft reply. Ready means accurate, answers the request, invents nothing. Unsafe means it invents refunds, credits, or policies.",
+      {
+        options: {
+          ready: "accurate and sendable as-is",
+          revise: "inaccurate, incomplete, unsafe, or invents compensation",
         },
-      ],
-      ...LOCAL_JEV,
-    }),
+        pass: "ready",
+      },
+    ),
   },
-  thresholds: { scorers: { ready: { allow: ["ready"] } }, passRate: 0.5 },
+  passRate: 0.5,
+  judge: localJev,
 });
-
-const report = await runEval(spec);
-console.log(toMarkdown(report));
-if (!report.thresholdsMet) process.exitCode = 1;
+console.log(report.markdown());

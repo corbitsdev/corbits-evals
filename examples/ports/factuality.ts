@@ -1,8 +1,8 @@
-// ABCDE factuality rubric with graded scores (A:.4 B:.6 C:1 D:0 E:1).
-// Agreement vs ground truth is the metric; exactMatch is the baseline.
+// ABCDE factuality rubric: A, B, C and E count as factual, D does not.
+// Agreement vs ground truth is the metric; exact match is the baseline.
 // Run: bun examples/ports/factuality.ts
-import { defineEval, exactMatch, jevJudge, runEval, toMarkdown } from "../../src/index.js";
-import { LOCAL_JEV } from "../ollama.js";
+import { ask, evaluate, matches } from "../../src/index.js";
+import { localJev } from "../ollama.js";
 
 const CRITERIA = {
   A: "subset of the expert answer and fully consistent with it",
@@ -74,53 +74,33 @@ const CASES: { id: string; question: string; expert: string; submission: string;
     },
   ];
 
-const factuality = jevJudge<string, string>({
-  questions: [
-    {
-      id: "fact",
-      type: "choice",
-      instructions:
-        "Compare the factual content of the submitted answer with the expert answer. Ignore style, grammar, punctuation. Pick one option.",
-      criteria: CRITERIA,
-    },
-  ],
-  scores: { fact: { A: 0.4, B: 0.6, C: 1, D: 0, E: 1 } },
-  state: (evalCase, result) => ({
-    question: evalCase.input,
-    expert: evalCase.expected,
-    submission: result.output,
-  }),
-  ...LOCAL_JEV,
-});
-
-const spec = defineEval({
-  name: "port-factuality",
-  dataset: CASES.map((c) => ({ id: c.id, input: c.question, expected: c.expert })),
-  task: async (input) => {
-    const found = CASES.find((c) => c.question === input);
-    if (!found) throw new Error("unknown case");
-    return { output: found.submission };
+const report = await evaluate("port-factuality", {
+  run: (question: string) => CASES.find((c) => c.question === question)?.submission ?? "",
+  cases: CASES.map((c) => ({ name: c.id, input: c.question, expect: c.expert })),
+  checks: {
+    baseline_exact: matches(),
+    jev_factuality: ask(
+      "Compare the factual content of the output with the expert answer in expect. Ignore style, grammar, punctuation. Pick one option.",
+      { options: CRITERIA, pass: ["A", "B", "C", "E"] },
+    ),
   },
-  scorers: { baseline_exact: exactMatch(), jev_factuality: factuality },
-  // A/B/C/E (>= .4) count as factual; D (0) does not.
-  thresholds: { scorers: { jev_factuality: { min: 0.4 } } },
+  passRate: 0,
+  judge: localJev,
 });
-
-const report = await runEval(spec);
-console.log(toMarkdown(report));
+console.log(report.markdown());
 
 let baselineAgree = 0;
 let jevAgree = 0;
 let jevOption = 0;
 for (const c of report.cases) {
-  const truth = CASES.find((t) => t.id === c.id)?.truth;
+  const truth = CASES.find((t) => t.id === c.name)?.truth;
   if (!truth) continue;
-  if ((c.scorers["baseline_exact"]?.pass ?? false) === truth.pass) baselineAgree += 1;
-  const jv = c.scorers["jev_factuality"];
+  if ((c.checks["baseline_exact"]?.pass ?? false) === truth.pass) baselineAgree += 1;
+  const jv = c.checks["jev_factuality"];
   if ((jv?.pass ?? false) === truth.pass) jevAgree += 1;
   if (jv?.label === truth.option) jevOption += 1;
 }
 console.log(`\nagreement with ground truth over ${CASES.length} cases:`);
-console.log(`- baseline exactMatch pass/fail: ${baselineAgree}/${CASES.length}`);
-console.log(`- jev factuality pass/fail:      ${jevAgree}/${CASES.length}`);
-console.log(`- jev exact ABCDE option:         ${jevOption}/${CASES.length}`);
+console.log(`- baseline exact match pass/fail: ${baselineAgree}/${CASES.length}`);
+console.log(`- jev factuality pass/fail:       ${jevAgree}/${CASES.length}`);
+console.log(`- jev exact ABCDE option:          ${jevOption}/${CASES.length}`);

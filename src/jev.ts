@@ -2,165 +2,170 @@ import {
   evaluate,
   type Decision,
   type EndpointConfig,
+  type EvaluateConfig,
   type EvaluateDeps,
   type Question,
-  type State,
 } from "@corbits/system-one";
 
-import { booleanResult, categoryResult, clamp01, normalize, scoreResult } from "./results.js";
-import type { EvalCase, Result, Scorer, ScorerResult, TaskOutput } from "./types.js";
+import { toMs, type Duration } from "./timeout.js";
+import type { Outcome, Run } from "./types.js";
 
-export type JevJudgeOptions<I = string, E = string> = {
-  questions: Question[];
-  /**
-   * Partial credit for choice questions, keyed by question id then option
-   * (factuality A:.4 B:.6 C:1 D:0 E:1). A graded choice becomes a score
-   * result instead of a category.
-   */
-  scores?: Record<string, Record<string, number>>;
-  state?: (evalCase: EvalCase<I, E>, result: TaskOutput) => unknown;
+export type JevOptions = {
+  /** "official" (default), "gateway", or the URL of a custom endpoint. */
+  endpoint?: string;
+  model?: string;
+  /** Defaults to the endpoint's environment key, as `@corbits/system-one` reads it. */
   apiKey?: string;
-  timeoutMs?: number;
+  /** Bounds one Jev call. `@corbits/system-one` defaults to 1500ms. */
+  timeout?: Duration;
+  /** Replaces `fetch` and the scheduler, e.g. to stub Jev in tests. */
   deps?: EvaluateDeps;
-  endpoint?: EndpointConfig;
 };
 
-export function defaultJevState<I, E>(
-  evalCase: EvalCase<I, E>,
-  result: TaskOutput,
-): Record<string, unknown> {
-  const state: Record<string, unknown> = {
-    input: evalCase.input,
-    output: result.output,
-  };
-  if (evalCase.expected !== undefined) state["expected"] = evalCase.expected;
-  if (result.trajectory !== undefined) state["trajectory"] = result.trajectory;
-  if (evalCase.metadata !== undefined) state["context"] = evalCase.metadata;
-  return state;
+export type Judge = { readonly config: EvaluateConfig; readonly deps?: EvaluateDeps };
+
+function toEndpoint(endpoint?: string, model?: string): EndpointConfig | undefined {
+  const named = model === undefined ? {} : { model };
+  if (endpoint === undefined)
+    return model === undefined ? undefined : { kind: "official", ...named };
+  if (endpoint === "official" || endpoint === "gateway") return { kind: endpoint, ...named };
+  return { kind: "custom", url: endpoint, ...named };
 }
 
-/** Misconfiguration must fail at definition time, not as a permanently red eval. */
-function validateOptions(questions: readonly Question[], scores: JevJudgeOptions["scores"]) {
-  if (questions.length === 0) throw new Error("jevJudge needs at least one question");
-  const byId = new Map(questions.map((q) => [q.id, q]));
-  for (const [id, grades] of Object.entries(scores ?? {})) {
-    const q = byId.get(id);
-    if (q === undefined) throw new Error(`jevJudge: scores for "${id}" match no question`);
-    if (q.type !== "choice")
-      throw new Error(`jevJudge: scores only apply to choice questions ("${id}")`);
-    const options = new Set(Object.keys(q.criteria));
-    for (const option of Object.keys(grades)) {
-      if (!options.has(option))
-        throw new Error(`jevJudge: question "${id}" has no option "${option}"`);
-    }
-  }
+export function jev(options: JevOptions = {}): Judge {
+  const config: EvaluateConfig = {};
+  const endpoint = toEndpoint(options.endpoint, options.model);
+  if (endpoint !== undefined) config.endpoint = endpoint;
+  if (options.apiKey !== undefined) config.apiKey = options.apiKey;
+  if (options.timeout !== undefined) config.timeoutMs = toMs(options.timeout, "jev timeout");
+  return options.deps === undefined ? { config } : { config, deps: options.deps };
 }
 
-function decisionToResult(
-  decision: Decision,
-  question: Question | undefined,
-  grades: Record<string, number> | undefined,
-): ScorerResult {
-  if (decision.type === "choice") {
-    const graded = grades?.[decision.choice];
-    const scale = question?.type === "choice" ? Object.keys(question.criteria) : undefined;
+/** A Jev question with named answers. A plain string check is the yes/no case. */
+export type Ask = {
+  readonly question: string;
+  readonly options?: Readonly<Record<string, string>>;
+  readonly levels?: readonly string[];
+  readonly pass: readonly string[];
+};
+
+/** Pick one option; pass when Jev picks one of `pass`. */
+export function ask(
+  question: string,
+  spec: { options: Readonly<Record<string, string>>; pass: string | readonly string[] },
+): Ask;
+/** Grade on ordered levels, lowest first; pass at `pass` or above. */
+export function ask(question: string, spec: { levels: readonly string[]; pass: string }): Ask;
+export function ask(
+  question: string,
+  spec: {
+    options?: Readonly<Record<string, string>>;
+    levels?: readonly string[];
+    pass: string | readonly string[];
+  },
+): Ask {
+  if (question.trim() === "") throw new Error("ask needs a question");
+  const pass = typeof spec.pass === "string" ? [spec.pass] : spec.pass;
+  const names = spec.options === undefined ? spec.levels : Object.keys(spec.options);
+  if (names === undefined) throw new Error("ask needs options or levels");
+  if (spec.levels !== undefined && (spec.levels.length < 2 || spec.levels.length > 10)) {
+    throw new Error("ask: levels must have 2 to 10 entries");
+  }
+  if (names.length === 0) throw new Error("ask: options must not be empty");
+  if (pass.length === 0) throw new Error("ask: pass names no answer");
+  for (const name of pass) {
+    if (!names.includes(name)) throw new Error(`ask: pass "${name}" is not an answer`);
+  }
+  return spec.options === undefined
+    ? { question, levels: names, pass }
+    : { question, options: spec.options, pass };
+}
+
+/** Yes/no passes at p >= YES, fails at p <= NO; between is unsure and fails. */
+const YES = 0.7;
+const NO = 0.3;
+/** A choice or level picked with less probability than this is unsure and fails. */
+const SURE = 0.6;
+
+function toQuestion(check: Ask | string): Question {
+  if (typeof check === "string") return { id: "q", type: "boolean", instructions: check };
+  if (check.options !== undefined) {
     return {
-      result:
-        graded === undefined
-          ? categoryResult(decision.choice, scale)
-          : scoreResult(clamp01(graded)),
-      label: decision.choice,
-      confidence: decision.confidence,
-      metadata: { probabilities: decision.probabilities },
+      id: "q",
+      type: "choice",
+      instructions: check.question,
+      criteria: { ...check.options },
     };
   }
-  if (decision.type === "score") {
-    const levels = Object.keys(decision.legend).length;
-    return {
-      result: scoreResult(levels <= 1 ? 0 : decision.score / (levels - 1)),
-      label: String(decision.score),
-      confidence: decision.confidence,
-      metadata: { probabilities: decision.probabilities },
-    };
-  }
-  const yes = decision.noul >= 0.5;
   return {
-    result: booleanResult(yes),
-    label: yes ? "true" : "false",
-    confidence: yes ? decision.noul : 1 - decision.noul,
-    metadata: { pTrue: decision.noul },
+    id: "q",
+    type: "score",
+    instructions: check.question,
+    criteria: [...(check.levels ?? [])],
   };
 }
 
-function failed(explanation: string, metadata?: Record<string, unknown>): ScorerResult {
-  const result: ScorerResult = { result: scoreResult(0), explanation };
-  if (metadata !== undefined) result.metadata = metadata;
-  return result;
+function failed(explanation: string): Outcome {
+  return { pass: false, value: 0, explanation };
 }
 
-/**
- * One POST per call because Jev answers independent questions in
- * parallel. One question yields its result directly (category, score or
- * boolean); several yield the mean of their normalized results as a
- * score, with each decision under `metadata.per`. Fail-closed: transport
- * fallbacks, thrown errors and empty decision sets all return score 0.
- */
-export function jevJudge<I = string, E = string>(options: JevJudgeOptions<I, E>): Scorer<I, E> {
-  validateOptions(options.questions, options.scores);
-  const byId = new Map(options.questions.map((q) => [q.id, q]));
-  const buildState = options.state ?? defaultJevState<I, E>;
-  return async ({ evalCase, result }) => {
-    let out;
-    try {
-      out = await evaluate(
-        {
-          state: buildState(evalCase, result) as State,
-          questions: options.questions,
-          ...(options.apiKey !== undefined ||
-          options.timeoutMs !== undefined ||
-          options.endpoint !== undefined
-            ? {
-                config: {
-                  ...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-                  ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-                  ...(options.endpoint !== undefined ? { endpoint: options.endpoint } : {}),
-                },
-              }
-            : {}),
-        },
-        options.deps !== undefined ? { deps: options.deps } : undefined,
-      );
-    } catch (cause) {
-      return failed(`jev threw: ${cause instanceof Error ? cause.message : String(cause)}`);
-    }
-    if (out.fallback) {
-      return failed(`jev fallback (${out.reason}): ${out.detail ?? "no detail"}`, {
-        reason: out.reason,
-      });
-    }
-    if (out.decisions.length === 0) return failed("jev returned no decisions");
-    const per = out.decisions.map((d) =>
-      decisionToResult(d, byId.get(d.id), options.scores?.[d.id]),
+function p(n: number): string {
+  return n.toFixed(2);
+}
+
+function toOutcome(check: Ask | string, decision: Decision): Outcome {
+  if (decision.type === "noul") {
+    const yes = decision.noul;
+    if (yes >= YES) return { pass: true, value: yes, label: "yes" };
+    if (yes <= NO) return { pass: false, value: yes, label: "no", explanation: `no (p=${p(yes)})` };
+    return { pass: false, value: yes, label: "unsure", explanation: `unsure (p=${p(yes)})` };
+  }
+  const ask = check as Ask;
+  const top = Math.max(...Object.values(decision.probabilities));
+  if (decision.type === "choice") {
+    const value = Math.min(
+      1,
+      ask.pass.reduce((t, name) => t + (decision.probabilities[name] ?? 0), 0),
     );
-    const only = per[0];
-    if (per.length === 1 && only !== undefined) {
-      return { ...only, metadata: { ...only.metadata, modelId: out.modelId } };
+    if (top < SURE) {
+      return {
+        ...failed(`unsure (p=${p(top)} for "${decision.choice}")`),
+        value,
+        label: decision.choice,
+      };
     }
-    const values = per.map((r) => normalize(r.result, false));
-    const confidences = per.map((r) => r.confidence).filter((c): c is number => c !== undefined);
-    const compiled: ScorerResult = {
-      result: scoreResult(values.reduce((t, v) => t + v, 0) / values.length),
-      explanation: per.map((r, i) => `${out.decisions[i]?.id ?? i}=${r.label ?? "?"}`).join(", "),
-      metadata: {
-        modelId: out.modelId,
-        per: Object.fromEntries(out.decisions.map((d, i) => [d.id, per[i]])),
-      },
-    };
-    if (confidences.length > 0) {
-      compiled.confidence = confidences.reduce((t, c) => t + c, 0) / confidences.length;
-    }
-    return compiled;
-  };
+    const pass = ask.pass.includes(decision.choice);
+    const outcome: Outcome = { pass, value, label: decision.choice };
+    if (!pass) outcome.explanation = `picked "${decision.choice}"`;
+    return outcome;
+  }
+  const levels = ask.levels ?? [];
+  const index = Math.round(decision.score);
+  const level = levels[index] ?? String(decision.score);
+  const value = decision.score / (levels.length - 1);
+  if (top < SURE) return { ...failed(`unsure (p=${p(top)} for "${level}")`), value, label: level };
+  const pass = index >= levels.indexOf(ask.pass[0] ?? "");
+  const outcome: Outcome = { pass, value, label: level };
+  if (!pass) outcome.explanation = `graded "${level}"`;
+  return outcome;
 }
 
-export type { Decision, EndpointConfig, Question, Result };
+/** Fail-closed: transport fallbacks, thrown errors and missing decisions all fail. */
+export async function askJev(judge: Judge, check: Ask | string, run: Run): Promise<Outcome> {
+  const state: Record<string, unknown> = { input: run.input, output: run.output };
+  if (run.expect !== undefined) state["expect"] = run.expect;
+  if (run.steps.length > 0) state["steps"] = run.steps;
+  let out;
+  try {
+    out = await evaluate(
+      { state, questions: [toQuestion(check)], config: judge.config },
+      judge.deps === undefined ? undefined : { deps: judge.deps },
+    );
+  } catch (cause) {
+    return failed(`jev threw: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  if (out.fallback) return failed(`jev fallback (${out.reason}): ${out.detail ?? "no detail"}`);
+  const decision = out.decisions[0];
+  if (decision === undefined) return failed("jev returned no decision");
+  return toOutcome(check, decision);
+}

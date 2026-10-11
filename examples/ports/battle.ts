@@ -1,8 +1,7 @@
 // Pairwise beats absolute 1-10 for small judges.
 // Run: bun examples/ports/battle.ts
-import { booleanResult, defineEval, jevJudge, runEval, toMarkdown } from "../../src/index.js";
-import type { Scorer } from "../../src/index.js";
-import { LOCAL_JEV } from "../ollama.js";
+import { ask, evaluate } from "../../src/index.js";
+import { localJev } from "../ollama.js";
 
 const QUESTION = "What is the capital of France?";
 
@@ -13,57 +12,33 @@ const ANSWERS: Record<string, string> = {
   wrong: "The capital of France is Lyon, a lovely city.",
 };
 
-const PAIRS: { id: string; a: string; b: string; truth: string }[] = [
-  { id: "best-vs-good", a: "best", b: "good", truth: "A" },
-  { id: "good-vs-thin", a: "good", b: "thin", truth: "A" },
-  { id: "thin-vs-wrong", a: "thin", b: "wrong", truth: "A" },
-  { id: "best-vs-wrong", a: "best", b: "wrong", truth: "A" },
+// Ground truth: A wins every pair.
+const PAIRS: [string, string][] = [
+  ["best", "good"],
+  ["good", "thin"],
+  ["thin", "wrong"],
+  ["best", "wrong"],
 ];
 
-const pairwise = jevJudge<string, string>({
-  questions: [
-    {
-      id: "battle",
-      type: "choice",
-      instructions:
-        "Which answer better serves the question? Correctness first, then completeness.",
-      criteria: {
+// Jev sees the case input, so each pair goes in as { question, A, B }.
+const report = await evaluate("port-battle", {
+  run: (pair: { question: string; A: string; B: string }) => pair,
+  cases: PAIRS.map(([a, b]) => ({
+    name: `${a}-vs-${b}`,
+    input: { question: QUESTION, A: ANSWERS[a] ?? "", B: ANSWERS[b] ?? "" },
+  })),
+  checks: {
+    battle: ask("Which answer better serves the question? Correctness first, then completeness.", {
+      options: {
         A: "answer A is better",
         B: "answer B is better",
         tie: "they are equally good",
       },
-    },
-  ],
-  state: (evalCase) => {
-    const pair = PAIRS.find((p) => p.id === String(evalCase.input));
-    return {
-      question: QUESTION,
-      A: pair ? (ANSWERS[pair.a] ?? "") : "",
-      B: pair ? (ANSWERS[pair.b] ?? "") : "",
-    };
+      pass: "A",
+    }),
   },
-  ...LOCAL_JEV,
+  passRate: 0,
+  judge: localJev,
 });
-
-const battleJudge: Scorer<string, string> = async (args) => {
-  const verdict = await pairwise(args);
-  const truth = PAIRS.find((p) => p.id === args.evalCase.id)?.truth;
-  const agree = verdict.label === truth;
-  return {
-    ...verdict,
-    result: booleanResult(agree),
-    explanation: `picked ${verdict.label ?? "?"}, truth ${truth ?? "?"}`,
-  };
-};
-
-const spec = defineEval({
-  name: "port-battle",
-  dataset: PAIRS.map((p) => ({ id: p.id, input: p.id, expected: p.truth })),
-  task: async () => ({ output: "compare A vs B" }),
-  scorers: { battle: battleJudge },
-});
-
-const report = await runEval(spec);
-console.log(toMarkdown(report));
-const agree = report.cases.filter((c) => c.pass).length;
-console.log(`\npairwise agreement with ground truth: ${agree}/${PAIRS.length}`);
+console.log(report.markdown());
+console.log(`\npairwise agreement with ground truth: ${report.passed}/${PAIRS.length}`);

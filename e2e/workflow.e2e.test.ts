@@ -2,11 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { defineAgent } from "@intx/agent";
 import { defineWorkflow, step, type StepInvoker } from "@intx/workflow";
 
-import { booleanResult, scoreResult } from "../src/results.js";
-import { defineEval, runEval } from "../src/runner.js";
-import { exactMatch, latencyBudget, toolCallF1 } from "../src/scorers.js";
-import type { Scorer } from "../src/types.js";
-import { fromIntxWorkflow } from "../src/workflow.js";
+import { EvalFailure, evaluate, matches, ranSteps, under } from "../src/index.js";
+import { workflow } from "../src/workflow.js";
 
 function agent(id: string) {
   return defineAgent({
@@ -37,114 +34,59 @@ const invokeStep: StepInvoker = async ({ agent: a, input }) => {
   return { output: String(input).toUpperCase() };
 };
 
-const stepOrder =
-  (expected: readonly string[]): Scorer =>
-  ({ result }) => {
-    const names = (result.trajectory ?? []).filter((s) => s.kind === "step").map((s) => s.name);
-    return {
-      result: booleanResult(names.join(">") === expected.join(">")),
-      explanation: names.join(" > "),
-    };
-  };
-
-describe("fromIntxWorkflow", () => {
-  test("evaluates a two-step workflow end to end with trajectory scorers", async () => {
-    const report = await runEval(
-      defineEval({
-        name: "workflow",
-        dataset: [{ id: "refund", input: "refund me", expected: "DRAFT: REFUND ME" }],
-        task: fromIntxWorkflow(pipeline, {
-          invokeStep,
-          output: (run) => String(run.outputs["review"]),
-        }),
-        scorers: {
-          exact: exactMatch(),
-          order: stepOrder(["drafter", "reviewer"]),
-          fast: latencyBudget(5_000),
-        },
-      }),
-    );
-    const caseReport = report.cases[0];
-    expect(caseReport?.error).toBeUndefined();
-    expect(caseReport?.pass).toBe(true);
-    expect(caseReport?.scorers["order"]?.explanation).toBe("drafter > reviewer");
-  });
-
-  test("toolCallF1 scores workflow steps by name", async () => {
-    const report = await runEval(
-      defineEval({
-        name: "workflow-f1",
-        dataset: [{ id: "refund", input: "refund me" }],
-        task: fromIntxWorkflow(pipeline, {
-          invokeStep,
-          output: (run) => String(run.outputs["review"]),
-        }),
-        scorers: {
-          steps: toolCallF1(["drafter", "reviewer"]),
-          wrong: toolCallF1(["drafter", "approver"]),
-        },
-      }),
-    );
-    const caseReport = report.cases[0];
-    expect(caseReport?.scorers["steps"]?.result).toEqual(scoreResult(1));
-    expect(caseReport?.scorers["wrong"]?.result).toEqual(scoreResult(0.5));
-  });
-
-  test("input-agnostic scorers accept object input and expected", async () => {
-    const report = await runEval(
-      defineEval({
-        name: "workflow-object",
-        dataset: [
-          {
-            id: "refund",
-            input: { order: 42, reason: "late" },
-            expected: { decision: "refund" },
-          },
-        ],
-        task: fromIntxWorkflow(pipeline, {
-          invokeStep,
-          output: (run) => String(run.outputs["review"]),
-        }),
-        scorers: { steps: toolCallF1(["drafter", "reviewer"]), fast: latencyBudget(5_000) },
-      }),
-    );
-    expect(report.cases[0]?.error).toBeUndefined();
-    expect(report.cases[0]?.pass).toBe(true);
-  });
-
-  test("records per-step input, output and latency", async () => {
-    const task = fromIntxWorkflow(pipeline, {
-      invokeStep,
-      output: (run) => String(run.outputs["review"]),
+describe("workflow runs", () => {
+  test("output defaults to the last step and every step is recorded", async () => {
+    const report = await evaluate("workflow", {
+      run: workflow<string, string>(pipeline, { invokeStep }),
+      cases: [{ input: "refund me", expect: "DRAFT: REFUND ME" }],
+      checks: {
+        exact: matches(),
+        order: (r) => r.steps.map((s) => s.name).join(">") === "drafter>reviewer",
+        steps: ranSteps(["drafter", "reviewer"]),
+        fast: under({ ms: 5_000 }),
+      },
     });
-    const out = await task("hi");
-    expect(out.trajectory).toHaveLength(2);
-    expect(out.trajectory?.[0]).toMatchObject({
+    expect(report.ok).toBe(true);
+    const [draft, review] = report.cases[0]?.steps ?? [];
+    expect(draft).toMatchObject({
       name: "drafter",
       kind: "step",
-      input: "hi",
-      output: "draft: hi",
+      input: "refund me",
+      output: "draft: refund me",
     });
-    expect(out.trajectory?.[1]?.output).toBe("DRAFT: HI");
-    expect(typeof out.trajectory?.[1]?.latencyMs).toBe("number");
+    expect(review?.output).toBe("DRAFT: REFUND ME");
+    expect(typeof review?.ms).toBe("number");
+  });
+
+  test("output and trigger pick object values", async () => {
+    const report = await evaluate("workflow-object", {
+      run: workflow(pipeline, {
+        invokeStep,
+        trigger: (input: { order: number }) => `order ${input.order}`,
+        output: (run) => ({ draft: run.outputs["draft"], review: run.outputs["review"] }),
+      }),
+      cases: [
+        { input: { order: 42 }, expect: { draft: "draft: order 42", review: "DRAFT: ORDER 42" } },
+      ],
+    });
+    expect(report.ok).toBe(true);
   });
 
   test("a failing step fails the case closed", async () => {
-    const report = await runEval(
-      defineEval({
-        name: "workflow-fail",
-        dataset: [{ id: "a", input: "x", expected: "X" }],
-        task: fromIntxWorkflow(pipeline, {
+    try {
+      await evaluate("workflow-fail", {
+        run: workflow(pipeline, {
           invokeStep: async ({ agent: a }) => {
             if (a.id === "reviewer") throw new Error("reviewer down");
             return { output: "draft" };
           },
-          output: (run) => String(run.outputs["review"]),
         }),
-        scorers: { exact: exactMatch() },
-      }),
-    );
-    expect(report.cases[0]?.pass).toBe(false);
-    expect(report.cases[0]?.error).toContain("failed");
+        cases: [{ input: "x", expect: "X" }],
+      });
+      throw new Error("expected a failure");
+    } catch (cause) {
+      if (!(cause instanceof EvalFailure)) throw cause;
+      expect(cause.report.cases[0]?.error).toContain('workflow "support-reply" ended failed');
+    }
   });
 });
