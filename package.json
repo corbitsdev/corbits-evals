@@ -67,6 +67,9 @@
     "@intx/workflow": "^0.4.0"
   },
   "peerDependenciesMeta": {
+    "@intx/agent": {
+      "optional": true
+    },
     "@intx/workflow": {
       "optional": true
     }

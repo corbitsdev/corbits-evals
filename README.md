@@ -93,6 +93,14 @@ The runner normalizes every result to 0..1 for `avgScore` and diffs.
   pass flips, score deltas, and added/removed cases by id between two
   runs. Store the JSON wherever you like (CI artifact, committed baseline).
 
+## Peers
+
+- `@corbits/evals`: `@intx/inference` and `@intx/types`, peers of
+  `@corbits/system-one`.
+- `fromIntxAgent`, `senderFromIntxAgent`, `agentJudge`: `@intx/agent`
+  (optional).
+- `@corbits/evals/workflow`: `@intx/workflow` (optional).
+
 ## Examples
 
 `examples/` runs against local Ollama (`bun examples/<name>.ts`).
