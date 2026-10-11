@@ -1,6 +1,6 @@
 // Pairwise beats absolute 1-10 for small judges.
 // Run: bun examples/ports/battle.ts
-import { defineEval, jevJudge, runEval, success, toMarkdown } from "../../src/index.js";
+import { booleanResult, defineEval, jevJudge, runEval, toMarkdown } from "../../src/index.js";
 import type { Scorer } from "../../src/index.js";
 import { LOCAL_JEV } from "../ollama.js";
 
@@ -34,8 +34,8 @@ const pairwise = jevJudge<string, string>({
       },
     },
   ],
-  state: (kase) => {
-    const pair = PAIRS.find((p) => p.id === String(kase.input));
+  state: (evalCase) => {
+    const pair = PAIRS.find((p) => p.id === String(evalCase.input));
     return {
       question: QUESTION,
       A: pair ? (ANSWERS[pair.a] ?? "") : "",
@@ -47,11 +47,11 @@ const pairwise = jevJudge<string, string>({
 
 const battleJudge: Scorer<string, string> = async (args) => {
   const verdict = await pairwise(args);
-  const truth = PAIRS.find((p) => p.id === args.kase.id)?.truth;
+  const truth = PAIRS.find((p) => p.id === args.evalCase.id)?.truth;
   const agree = verdict.label === truth;
   return {
     ...verdict,
-    result: success(agree),
+    result: booleanResult(agree),
     explanation: `picked ${verdict.label ?? "?"}, truth ${truth ?? "?"}`,
   };
 };

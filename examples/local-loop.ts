@@ -29,10 +29,10 @@ const spec = defineEval({
     },
   ],
   task: fromFunction(async (input: string) => {
-    const kase = spec.dataset.find((d) => d.input === input);
+    const evalCase = spec.dataset.find((d) => d.input === input);
     const reply = await ollamaGenerate(
       "qwen2.5:7b",
-      `${SYSTEM}\n\nVerified context: ${JSON.stringify(kase?.metadata?.["verified"])}\nCustomer: ${input}`,
+      `${SYSTEM}\n\nVerified context: ${JSON.stringify(evalCase?.metadata?.["verified"])}\nCustomer: ${input}`,
     );
     generated.push({ input, reply });
     return { output: reply };
@@ -48,10 +48,10 @@ const spec = defineEval({
           criteria: { ready: "sendable", revise: "inaccurate or invents" },
         },
       ],
-      state: (kase, result) => ({
-        input: kase.input,
+      state: (evalCase, result) => ({
+        input: evalCase.input,
         output: result.output,
-        verified: (kase.metadata as Record<string, unknown> | undefined)?.["verified"],
+        verified: (evalCase.metadata as Record<string, unknown> | undefined)?.["verified"],
       }),
       ...LOCAL_JEV,
     }),

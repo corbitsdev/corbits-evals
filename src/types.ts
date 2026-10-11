@@ -41,7 +41,7 @@ export type ScorerResult = {
 };
 
 export type Scorer<I = string, E = string> = (args: {
-  kase: EvalCase<I, E>;
+  evalCase: EvalCase<I, E>;
   result: TaskOutput;
 }) => Promise<ScorerResult> | ScorerResult;
 

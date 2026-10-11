@@ -61,7 +61,7 @@ const faithfulness = jevJudge<string, string>({
       criteria: CRITERIA,
     },
   ],
-  state: (kase, result) => ({ context: kase.expected, answer: result.output }),
+  state: (evalCase, result) => ({ context: evalCase.expected, answer: result.output }),
   ...LOCAL_JEV,
 });
 

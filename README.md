@@ -51,8 +51,8 @@ A scorer returns a `Result`, never pass/fail:
 ```ts
 type Result =
   | { kind: "score"; value: number } // 0..1
-  | { kind: "boolean"; value: boolean } // success(true)
-  | { kind: "category"; value: string; scale?: string[] }; // category("Med", ["Low","Med","High"])
+  | { kind: "boolean"; value: boolean } // booleanResult(true)
+  | { kind: "category"; value: string; scale?: string[] }; // categoryResult("Med", ["Low","Med","High"])
 ```
 
 Pass rules live in `thresholds.scorers`, keyed by scorer name: `{ min }`
