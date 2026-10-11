@@ -18,7 +18,12 @@
       },
       "peerDependencies": {
         "@intx/agent": "^0.4.0",
+        "@intx/workflow": "^0.4.0",
       },
+      "optionalPeers": [
+        "@intx/agent",
+        "@intx/workflow",
+      ],
     },
   },
   "packages": {
