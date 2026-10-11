@@ -1,5 +1,5 @@
-import { clamp01, normalize, score, success } from "./results.js";
-import type { Scorer } from "./types.js";
+import { clamp01, normalize, score, success, validateScorerResult } from "./results.js";
+import type { Scorer, ScorerResult } from "./types.js";
 
 function whitespace(output: string): string {
   return output.trim().replace(/\s+/g, " ");
@@ -109,15 +109,37 @@ export function keywordCoverage(): Scorer<string, string> {
   };
 }
 
+async function runMember<I, E>(
+  name: string,
+  scorer: Scorer<I, E>,
+  args: Parameters<Scorer<I, E>>[0],
+): Promise<ScorerResult | string> {
+  try {
+    return validateScorerResult(name, await scorer(args));
+  } catch (cause) {
+    return `scorer "${name}" threw: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+}
+
 /**
  * Mean of the members' normalized results as one score. Members are kept
  * in `metadata.members` so a low composite stays diagnosable. Booleans
- * count 1/0; categories need a scale to contribute anything but 0.
+ * count 1/0; categories need a scale to contribute anything but 0. An
+ * invalid or throwing member makes the composite throw, so it fails closed.
  */
 export function combineAll<I, E>(scorers: readonly Scorer<I, E>[]): Scorer<I, E> {
   if (scorers.length === 0) throw new Error("combineAll needs at least one scorer");
   return async (args) => {
-    const members = await Promise.all(scorers.map((s) => s(args)));
+    const checked = await Promise.all(
+      scorers.map((s, i) => runMember(`combineAll[${i}]`, s, args)),
+    );
+    const members: ScorerResult[] = [];
+    const failures: string[] = [];
+    for (const m of checked) {
+      if (typeof m === "string") failures.push(m);
+      else members.push(m);
+    }
+    if (failures.length > 0) throw new Error(failures.join("; "));
     const values = members.map((m) => normalize(m.result, false));
     return {
       result: score(values.reduce((t, v) => t + v, 0) / values.length),
