@@ -70,5 +70,8 @@
     "@intx/workflow": {
       "optional": true
     }
+  },
+  "engines": {
+    "bun": ">=1.2.0"
   }
 }
