@@ -89,9 +89,13 @@ The runner normalizes every result to 0..1 for `avgScore` and diffs.
   sender (`senderFromIntxAgent`). Pass `timeoutMs`; keep `parse` strict.
 - **Datasets** — `fromJsonl` / `fromCsv` load `EvalCase[]` from disk,
   validating shape and rejecting duplicate ids with line numbers.
-- **Diffing** — `toJson` emits a versioned report; `diffReports` lists
-  pass flips, score deltas, and added/removed cases by id between two
-  runs. Store the JSON wherever you like (CI artifact, committed baseline).
+- **Diffing** — every report carries `startedAt` and the spec's
+  `metadata` (e.g. `{ model }`). `toJson` emits it stamped with
+  `REPORT_FORMAT_VERSION`; `parseReport` / `fromJsonReport` load it back,
+  refusing a missing or unknown version and malformed shapes.
+  `diffReports` lists pass flips, score deltas, and added/removed cases
+  by id between two runs of the same eval, and throws across evals.
+  Store the JSON wherever you like (CI artifact, committed baseline).
 
 ## Peers
 

@@ -20,7 +20,16 @@ export {
   type JevJudgeOptions,
   type Question,
 } from "./jev.js";
-export { diffReports, toJson, toJUnit, toMarkdown, type ReportDiff } from "./reports.js";
+export {
+  diffReports,
+  fromJsonReport,
+  parseReport,
+  REPORT_FORMAT_VERSION,
+  toJson,
+  toJUnit,
+  toMarkdown,
+  type ReportDiff,
+} from "./reports.js";
 export { category, describe, meets, normalize, score, success } from "./results.js";
 export { defineEval, runEval, type EvalSpec, type EvalThresholds } from "./runner.js";
 export {
