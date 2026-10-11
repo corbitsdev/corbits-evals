@@ -90,6 +90,28 @@ describe("fromIntxWorkflow", () => {
     expect(kase?.scorers["wrong"]?.result).toEqual(score(0.5));
   });
 
+  test("input-agnostic scorers accept object input and expected", async () => {
+    const report = await runEval(
+      defineEval({
+        name: "workflow-object",
+        dataset: [
+          {
+            id: "refund",
+            input: { order: 42, reason: "late" },
+            expected: { decision: "refund" },
+          },
+        ],
+        task: fromIntxWorkflow(pipeline, {
+          invokeStep,
+          output: (run) => String(run.outputs["review"]),
+        }),
+        scorers: { steps: toolCallF1(["drafter", "reviewer"]), fast: latencyBudget(5_000) },
+      }),
+    );
+    expect(report.cases[0]?.error).toBeUndefined();
+    expect(report.cases[0]?.pass).toBe(true);
+  });
+
   test("records per-step input, output and latency", async () => {
     const task = fromIntxWorkflow(pipeline, {
       invokeStep,
