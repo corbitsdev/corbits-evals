@@ -77,8 +77,9 @@ The runner normalizes every result to 0..1 for `avgScore` and diffs.
   step recorded in the trajectory. All stamp `latencyMs` and honor the
   abort signal.
 - **Scorers** — deterministic (`exactMatch`, `keywordCoverage`,
-  `toolCallF1`, `latencyBudget`, `combineAll`) and judges. Every scorer
-  returns its lowest result when it has nothing to compare against.
+  `toolCallF1`, `latencyBudget`, `combineAll`) and judges. `toolCallF1`
+  matches `tool` and `step` names, so it scores workflows too. Every
+  scorer returns its lowest result when it has nothing to compare against.
 - **Jev judge** — `jevJudge` via `@corbits/system-one`. All questions
   go in one POST. A choice question yields a category over its criteria
   (or a score when `scores` grades the options), a score question a
