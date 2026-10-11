@@ -56,7 +56,7 @@ describe("jevJudge", () => {
       deps,
     });
     const verdict = await judge({
-      kase: { id: "a", input: "refund?", expected: "yes" },
+      evalCase: { id: "a", input: "refund?", expected: "yes" },
       result: { output: "yes, refunded" },
     });
     expect(calls).toBe(1);
@@ -80,7 +80,7 @@ describe("jevJudge", () => {
       deps,
     });
     const verdict = await judge({
-      kase: { id: "b", input: "x" },
+      evalCase: { id: "b", input: "x" },
       result: { output: "y" },
     });
     expect(verdict.result).toEqual({ kind: "score", value: 0 });
@@ -125,7 +125,7 @@ describe("jevJudge option validation", () => {
         }),
       ),
     });
-    const verdict = await judge({ kase: { id: "g", input: "x" }, result: { output: "y" } });
+    const verdict = await judge({ evalCase: { id: "g", input: "x" }, result: { output: "y" } });
     expect(verdict.result).toEqual({ kind: "score", value: 0.4 });
     expect(verdict.label).toBe("revise");
   });
@@ -137,7 +137,7 @@ describe("jevJudge option validation", () => {
       endpoint: { type: "custom" } as never,
       deps: stubDeps(jsonFetch({})),
     });
-    const verdict = await judge({ kase: { id: "x", input: "x" }, result: { output: "y" } });
+    const verdict = await judge({ evalCase: { id: "x", input: "x" }, result: { output: "y" } });
     expect(verdict.result).toEqual({ kind: "score", value: 0 });
     expect(verdict.explanation).toMatch(/jev (threw|fallback)/);
   });

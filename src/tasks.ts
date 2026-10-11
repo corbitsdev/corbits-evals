@@ -1,6 +1,6 @@
 import type { Agent, SendResult } from "@intx/agent";
 
-import type { EvalCase, TaskFn, TaskOutput } from "./types.js";
+import type { TaskFn, TaskOutput } from "./types.js";
 
 export function fromFunction<I>(
   fn: (input: I, signal?: AbortSignal) => Promise<string | TaskOutput> | string | TaskOutput,
@@ -28,18 +28,4 @@ export function fromIntxAgent(agent: Pick<Agent, "send">): TaskFn<string> {
     }
     return { output: res.reply, latencyMs: Date.now() - started };
   };
-}
-
-export function defaultState<I, E>(
-  kase: EvalCase<I, E>,
-  result: TaskOutput,
-): Record<string, unknown> {
-  const state: Record<string, unknown> = {
-    input: kase.input,
-    output: result.output,
-  };
-  if (kase.expected !== undefined) state["expected"] = kase.expected;
-  if (result.trajectory !== undefined) state["trajectory"] = result.trajectory;
-  if (kase.metadata !== undefined) state["context"] = kase.metadata;
-  return state;
 }

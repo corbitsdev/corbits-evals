@@ -20,17 +20,17 @@ function cell(s: string): string {
   return s.replace(/\|/g, "\\|").replace(/\r?\n/g, " ").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function scorerSummary(kase: CaseReport): string {
-  return Object.entries(kase.scorers)
+function scorerSummary(caseReport: CaseReport): string {
+  return Object.entries(caseReport.scorers)
     .map(([name, v]) => `${name}=${v.label ?? describe(v.result)}${v.pass ? "" : " ✗"}`)
     .join(", ");
 }
 
-function failureDetail(kase: CaseReport): string {
-  const lines = Object.entries(kase.scorers)
+function failureDetail(caseReport: CaseReport): string {
+  const lines = Object.entries(caseReport.scorers)
     .filter(([, v]) => !v.pass)
     .map(([name, v]) => `${name}: ${v.explanation ?? `score ${v.score.toFixed(3)}`}`);
-  return lines.length === 0 ? `score ${kase.score.toFixed(3)}` : lines.join("\n");
+  return lines.length === 0 ? `score ${caseReport.score.toFixed(3)}` : lines.join("\n");
 }
 
 /** One-line markdown summary plus per-case table. */
@@ -49,10 +49,11 @@ export function toMarkdown(report: EvalReport): string {
     `| case | pass | score | detail |`,
     `| ---- | ---- | ----- | ------ |`,
   ];
-  for (const kase of report.cases) {
-    const detail = kase.error === undefined ? scorerSummary(kase) : `error: ${kase.error}`;
+  for (const caseReport of report.cases) {
+    const detail =
+      caseReport.error === undefined ? scorerSummary(caseReport) : `error: ${caseReport.error}`;
     lines.push(
-      `| ${cell(kase.id)} | ${kase.pass ? "yes" : "no"} | ${kase.score.toFixed(3)} | ${cell(detail)} |`,
+      `| ${cell(caseReport.id)} | ${caseReport.pass ? "yes" : "no"} | ${caseReport.score.toFixed(3)} | ${cell(detail)} |`,
     );
   }
   return lines.join("\n");
@@ -64,14 +65,14 @@ export function toMarkdown(report: EvalReport): string {
  * testcase carries the eval-level gate so CI can key on it.
  */
 export function toJUnit(report: EvalReport): string {
-  const cases = report.cases.map((kase) => {
+  const cases = report.cases.map((caseReport) => {
     let body = "";
-    if (kase.error !== undefined) {
-      body = `    <error message="task error">${esc(kase.error)}</error>\n`;
-    } else if (!kase.pass) {
-      body = `    <failure message="case failed">${esc(failureDetail(kase))}</failure>\n`;
+    if (caseReport.error !== undefined) {
+      body = `    <error message="task error">${esc(caseReport.error)}</error>\n`;
+    } else if (!caseReport.pass) {
+      body = `    <failure message="case failed">${esc(failureDetail(caseReport))}</failure>\n`;
     }
-    return `  <testcase classname="${esc(report.eval)}" name="${esc(kase.id)}" time="${(kase.latencyMs / 1000).toFixed(3)}">\n${body}  </testcase>`;
+    return `  <testcase classname="${esc(report.eval)}" name="${esc(caseReport.id)}" time="${(caseReport.latencyMs / 1000).toFixed(3)}">\n${body}  </testcase>`;
   });
   const gate = report.thresholdsMet
     ? ""
@@ -153,7 +154,7 @@ function toCaseReport(raw: unknown, where: string): CaseReport {
   }
   const scorers = optionalObject(raw, "scorers", where);
   if (scorers === undefined) throw new Error(`${where}: "scorers" must be an object`);
-  const kase: CaseReport = {
+  const caseReport: CaseReport = {
     id,
     pass: bool(raw, "pass", where),
     score: finite(raw, "score", where),
@@ -163,8 +164,8 @@ function toCaseReport(raw: unknown, where: string): CaseReport {
     latencyMs: finite(raw, "latencyMs", where),
   };
   const error = optionalString(raw, "error", where);
-  if (error !== undefined) kase.error = error;
-  return kase;
+  if (error !== undefined) caseReport.error = error;
+  return caseReport;
 }
 
 /** Parses `toJson` output. Throws on a missing or unknown `format` and on a malformed report. */
@@ -192,8 +193,8 @@ export function parseReport(text: string, source = "report"): EvalReport {
   }
   if (!Array.isArray(raw["cases"])) throw new Error(`${source}: "cases" must be an array`);
   const ids = new Set<string>();
-  const cases = raw["cases"].map((kase: unknown, i) => {
-    const parsed = toCaseReport(kase, `${source}: cases[${i}]`);
+  const cases = raw["cases"].map((caseReport: unknown, i) => {
+    const parsed = toCaseReport(caseReport, `${source}: cases[${i}]`);
     if (ids.has(parsed.id)) throw new Error(`${source}: duplicate case id "${parsed.id}"`);
     ids.add(parsed.id);
     return parsed;

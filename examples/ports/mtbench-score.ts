@@ -35,7 +35,7 @@ const helpfulness = jevJudge<string, string>({
       criteria: LEVELS,
     },
   ],
-  state: (kase, result) => ({ question: QUESTION, answer: result.output }),
+  state: (evalCase, result) => ({ question: QUESTION, answer: result.output }),
   ...LOCAL_JEV,
 });
 

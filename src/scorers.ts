@@ -1,4 +1,4 @@
-import { clamp01, normalize, score, success, validateScorerResult } from "./results.js";
+import { booleanResult, clamp01, normalize, scoreResult, validateScorerResult } from "./results.js";
 import type { Scorer, ScorerResult } from "./types.js";
 
 function whitespace(output: string): string {
@@ -7,14 +7,14 @@ function whitespace(output: string): string {
 
 /** Boolean result. No `expected` is `false`, never a silent pass. */
 export function exactMatch(): Scorer<string, string> {
-  return ({ kase, result }) => {
-    if (kase.expected === undefined) {
+  return ({ evalCase, result }) => {
+    if (evalCase.expected === undefined) {
       return {
-        result: success(false),
-        explanation: `case "${kase.id}" has no expected value`,
+        result: booleanResult(false),
+        explanation: `case "${evalCase.id}" has no expected value`,
       };
     }
-    return { result: success(whitespace(result.output) === whitespace(kase.expected)) };
+    return { result: booleanResult(whitespace(result.output) === whitespace(evalCase.expected)) };
   };
 }
 
@@ -23,16 +23,19 @@ export function toolCallF1<I = unknown, E = unknown>(
   expectedTools: readonly string[],
 ): Scorer<I, E> {
   const expected = [...expectedTools].sort();
-  return ({ kase, result }) => {
+  return ({ evalCase, result }) => {
     if (result.trajectory === undefined) {
-      return { result: score(0), explanation: `case "${kase.id}" produced no trajectory` };
+      return {
+        result: scoreResult(0),
+        explanation: `case "${evalCase.id}" produced no trajectory`,
+      };
     }
     const actual = result.trajectory
       .filter((s) => s.kind === "tool" || s.kind === "step")
       .map((s) => s.name)
       .sort();
     if (expected.length === 0 && actual.length === 0) {
-      return { result: score(1), explanation: "expected no tool calls, got none" };
+      return { result: scoreResult(1), explanation: "expected no tool calls, got none" };
     }
     const counts = new Map<string, number>();
     for (const name of actual) counts.set(name, (counts.get(name) ?? 0) + 1);
@@ -48,7 +51,7 @@ export function toolCallF1<I = unknown, E = unknown>(
     const recall = expected.length === 0 ? 0 : overlap / expected.length;
     const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
     return {
-      result: score(clamp01(f1)),
+      result: scoreResult(clamp01(f1)),
       explanation: `expected [${expected.join(", ")}], got [${actual.join(", ")}]`,
     };
   };
@@ -56,13 +59,16 @@ export function toolCallF1<I = unknown, E = unknown>(
 
 /** Boolean result: the task finished within `maxMs`. */
 export function latencyBudget<I = unknown, E = unknown>(maxMs: number): Scorer<I, E> {
-  return ({ kase, result }) => {
+  return ({ evalCase, result }) => {
     const latencyMs = result.latencyMs;
     if (latencyMs === undefined) {
-      return { result: success(false), explanation: `case "${kase.id}" reported no latencyMs` };
+      return {
+        result: booleanResult(false),
+        explanation: `case "${evalCase.id}" reported no latencyMs`,
+      };
     }
     return {
-      result: success(latencyMs <= maxMs),
+      result: booleanResult(latencyMs <= maxMs),
       explanation: `${latencyMs}ms vs budget ${maxMs}ms`,
     };
   };
@@ -89,21 +95,21 @@ export function contentWords(text: string): string[] {
 
 /** Fraction of reference keywords present in the output. Word-reuse contradictions score high; pair with a judge. */
 export function keywordCoverage(): Scorer<string, string> {
-  return ({ kase, result }) => {
-    if (kase.expected === undefined) {
-      return { result: score(0), explanation: `case "${kase.id}" has no expected value` };
+  return ({ evalCase, result }) => {
+    if (evalCase.expected === undefined) {
+      return { result: scoreResult(0), explanation: `case "${evalCase.id}" has no expected value` };
     }
-    const reference = contentWords(kase.expected);
+    const reference = contentWords(evalCase.expected);
     if (reference.length === 0) {
       return {
-        result: score(0),
-        explanation: `case "${kase.id}" expected has no content words`,
+        result: scoreResult(0),
+        explanation: `case "${evalCase.id}" expected has no content words`,
       };
     }
     const response = new Set(contentWords(result.output));
     const matched = reference.filter((w) => response.has(w));
     return {
-      result: score(matched.length / reference.length),
+      result: scoreResult(matched.length / reference.length),
       explanation: `${matched.length}/${reference.length} keywords: ${matched.join(", ")}`,
     };
   };
@@ -142,7 +148,7 @@ export function combineAll<I, E>(scorers: readonly Scorer<I, E>[]): Scorer<I, E>
     if (failures.length > 0) throw new Error(failures.join("; "));
     const values = members.map((m) => normalize(m.result, false));
     return {
-      result: score(values.reduce((t, v) => t + v, 0) / values.length),
+      result: scoreResult(values.reduce((t, v) => t + v, 0) / values.length),
       explanation: members.map((m, i) => `${i}=${values[i]?.toFixed(2)}`).join(", "),
       metadata: { members },
     };

@@ -1,4 +1,4 @@
-import { score, toVerdict, validateScorerResult } from "./results.js";
+import { scoreResult, toVerdict, validateScorerResult } from "./results.js";
 import { withTimeout } from "./timeout.js";
 import type {
   CaseReport,
@@ -64,9 +64,10 @@ function validate<I, E>(spec: EvalSpec<I, E>): void {
     }
   }
   const ids = new Set<string>();
-  for (const kase of spec.dataset) {
-    if (ids.has(kase.id)) throw new Error(`eval "${spec.name}" has duplicate case id "${kase.id}"`);
-    ids.add(kase.id);
+  for (const evalCase of spec.dataset) {
+    if (ids.has(evalCase.id))
+      throw new Error(`eval "${spec.name}" has duplicate case id "${evalCase.id}"`);
+    ids.add(evalCase.id);
   }
   positiveInt(spec, "repeats");
   positiveInt(spec, "concurrency");
@@ -84,7 +85,9 @@ export async function runEval<I = string, E = string>(spec: EvalSpec<I, E>): Pro
   const startedAt = new Date().toISOString();
   const repeats = positiveInt(spec, "repeats");
   const concurrency = positiveInt(spec, "concurrency");
-  const cases = await mapPool(spec.dataset, concurrency, (kase) => runCase(spec, kase, repeats));
+  const cases = await mapPool(spec.dataset, concurrency, (evalCase) =>
+    runCase(spec, evalCase, repeats),
+  );
   const passed = cases.filter((c) => c.pass).length;
   const passRate = passed / cases.length;
   const avgScore = cases.reduce((t, c) => t + c.score, 0) / cases.length;
@@ -108,7 +111,7 @@ export async function runEval<I = string, E = string>(spec: EvalSpec<I, E>): Pro
 async function runTask<I>(
   task: TaskFn<I>,
   timeoutMs: number | undefined,
-  kase: Pick<EvalCase<I, unknown>, "id" | "input">,
+  evalCase: Pick<EvalCase<I, unknown>, "id" | "input">,
 ): Promise<TaskOutput> {
   const controller = new AbortController();
   const started = Date.now();
@@ -116,13 +119,13 @@ async function runTask<I>(
   const expiry = new Promise<never>((_, reject) => {
     if (timeoutMs === undefined) return;
     timer = setTimeout(() => {
-      const error = new Error(`case "${kase.id}" timed out after ${timeoutMs}ms`);
+      const error = new Error(`case "${evalCase.id}" timed out after ${timeoutMs}ms`);
       controller.abort(error);
       reject(error);
     }, timeoutMs);
   });
   try {
-    const result = await Promise.race([task(kase.input, controller.signal), expiry]);
+    const result = await Promise.race([task(evalCase.input, controller.signal), expiry]);
     return result.latencyMs === undefined ? { ...result, latencyMs: Date.now() - started } : result;
   } finally {
     clearTimeout(timer);
@@ -130,7 +133,7 @@ async function runTask<I>(
 }
 
 function failedVerdict(explanation: string): ScorerVerdict {
-  return { result: score(0), pass: false, score: 0, explanation };
+  return { result: scoreResult(0), pass: false, score: 0, explanation };
 }
 
 async function runScorer<I, E>(
@@ -183,7 +186,7 @@ function compileAttempts(attempts: readonly ScorerVerdict[]): ScorerVerdict {
 
 async function runCase<I, E>(
   spec: EvalSpec<I, E>,
-  kase: EvalCase<I, E>,
+  evalCase: EvalCase<I, E>,
   repeats: number,
 ): Promise<CaseReport> {
   const started = Date.now();
@@ -196,7 +199,7 @@ async function runCase<I, E>(
   for (let attempt = 0; attempt < repeats; attempt += 1) {
     let result;
     try {
-      result = await runTask(spec.task, spec.timeoutMs, kase);
+      result = await runTask(spec.task, spec.timeoutMs, evalCase);
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
       break;
@@ -206,7 +209,7 @@ async function runCase<I, E>(
         const verdict = await runScorer(
           name,
           scorer,
-          { kase, result },
+          { evalCase, result },
           thresholds[name],
           scorerTimeoutMs,
         );
@@ -221,7 +224,7 @@ async function runCase<I, E>(
   // A task error zeroes the case so partial repeats never inflate avgScore.
   const caseScore = error !== undefined ? 0 : scores.reduce((t, s) => t + s, 0) / scores.length;
   const report: CaseReport = {
-    id: kase.id,
+    id: evalCase.id,
     pass: error === undefined && Object.values(scorers).every((s) => s.pass),
     score: caseScore,
     scorers,

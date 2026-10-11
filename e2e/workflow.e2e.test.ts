@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { defineAgent } from "@intx/agent";
 import { defineWorkflow, step, type StepInvoker } from "@intx/workflow";
 
-import { score, success } from "../src/results.js";
+import { booleanResult, scoreResult } from "../src/results.js";
 import { defineEval, runEval } from "../src/runner.js";
 import { exactMatch, latencyBudget, toolCallF1 } from "../src/scorers.js";
 import type { Scorer } from "../src/types.js";
@@ -42,7 +42,7 @@ const stepOrder =
   ({ result }) => {
     const names = (result.trajectory ?? []).filter((s) => s.kind === "step").map((s) => s.name);
     return {
-      result: success(names.join(">") === expected.join(">")),
+      result: booleanResult(names.join(">") === expected.join(">")),
       explanation: names.join(" > "),
     };
   };
@@ -64,10 +64,10 @@ describe("fromIntxWorkflow", () => {
         },
       }),
     );
-    const kase = report.cases[0];
-    expect(kase?.error).toBeUndefined();
-    expect(kase?.pass).toBe(true);
-    expect(kase?.scorers["order"]?.explanation).toBe("drafter > reviewer");
+    const caseReport = report.cases[0];
+    expect(caseReport?.error).toBeUndefined();
+    expect(caseReport?.pass).toBe(true);
+    expect(caseReport?.scorers["order"]?.explanation).toBe("drafter > reviewer");
   });
 
   test("toolCallF1 scores workflow steps by name", async () => {
@@ -85,9 +85,9 @@ describe("fromIntxWorkflow", () => {
         },
       }),
     );
-    const kase = report.cases[0];
-    expect(kase?.scorers["steps"]?.result).toEqual(score(1));
-    expect(kase?.scorers["wrong"]?.result).toEqual(score(0.5));
+    const caseReport = report.cases[0];
+    expect(caseReport?.scorers["steps"]?.result).toEqual(scoreResult(1));
+    expect(caseReport?.scorers["wrong"]?.result).toEqual(scoreResult(0.5));
   });
 
   test("input-agnostic scorers accept object input and expected", async () => {
