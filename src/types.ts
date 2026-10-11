@@ -7,10 +7,14 @@ export type Step = {
 };
 
 export type Case<I = unknown, E = unknown> = {
-  /** Keys the case in reports and baselines. Defaults to the input. */
+  /** Keys the case in reports and compared runs. Defaults to the input. */
   name?: string;
   input: I;
   expect?: E;
+  /** Checks that must pass on this case, whatever `allow` says. */
+  must?: readonly string[];
+  /** Checks this case is not run or counted for. */
+  skip?: readonly string[];
 };
 
 /** One run of one case, as every check sees it. */
@@ -52,22 +56,37 @@ export type CaseResult<I = unknown, O = unknown, E = unknown> = {
   checks: Record<string, Outcome>;
 };
 
-/** A case × check whose pass flipped against the baseline. */
+/** A case × check whose pass flipped against the compared run. */
 export type Change = { case: string; check: string; change: "fixed" | "broke" };
+
+/** One check over every case it counted for, against its allowance. */
+export type CheckResult = {
+  passed: number;
+  /** Cases that do not skip the check. */
+  counted: number;
+  missed: number;
+  allow: { miss: number; drop: number };
+  /** Cases that passed in the compared run and fail now. Set when comparing. */
+  drop?: number;
+  /** Cases that `must` pass the check and failed it. */
+  mustFailed: string[];
+  ok: boolean;
+};
 
 export type Report<I = unknown, O = unknown, E = unknown> = {
   name: string;
   about?: Record<string, unknown>;
-  /** Pass rate met and nothing broke against the baseline. */
+  /** Every check within its allowance. */
   ok: boolean;
   total: number;
   passed: number;
-  passRate: number;
-  checks: Record<string, { passed: number; total: number }>;
+  checks: Record<string, CheckResult>;
   cases: CaseResult<I, O, E>[];
-  /** Present when a baseline existed before this run. */
+  /** Present when comparing. */
   changes?: Change[];
+  /** Cases only in this run. Present when comparing. */
+  added?: string[];
+  /** Cases only in the compared run. Present when comparing. */
+  removed?: string[];
   markdown(): string;
-  /** Writes the run in baseline form. */
-  save(path: string): Promise<void>;
 };

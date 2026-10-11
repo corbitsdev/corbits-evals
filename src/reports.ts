@@ -1,39 +1,39 @@
-import type { CaseResult, Change, Outcome, Report } from "./types.js";
+import type { CaseResult, Change, CheckResult, Outcome, Report } from "./types.js";
 
 type Row = Record<string, unknown>;
 
 /** A report without its methods. */
-export type ReportData = Omit<Report, "markdown" | "save">;
+export type ReportData = Omit<Report, "markdown">;
 
-/** What a stored run keeps: per case × check pass and value. No times, so diffs stay quiet. */
-export type Baseline = {
+/** Per case × check pass and value, without times, so it diffs cleanly in git. */
+export type Stored = {
   eval: string;
   about?: Record<string, unknown>;
-  passRate: number;
   cases: Record<string, Record<string, { pass: boolean; value: number }>>;
 };
 
-export const BASELINE_FORMAT = 1;
+const STORED_FORMAT = 1;
 
-export function round(n: number): number {
+function round(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
-export function toBaseline(report: ReportData): string {
-  const cases: Baseline["cases"] = {};
+export function fromReport(report: ReportData): Stored {
+  const cases: Stored["cases"] = {};
   for (const c of report.cases) {
     cases[c.name] = Object.fromEntries(
       Object.entries(c.checks).map(([name, o]) => [name, { pass: o.pass, value: round(o.value) }]),
     );
   }
-  const stored = {
-    format: BASELINE_FORMAT,
+  return {
     eval: report.name,
     ...(report.about === undefined ? {} : { about: report.about }),
-    passRate: round(report.passRate),
     cases,
   };
-  return `${JSON.stringify(stored, null, 2)}\n`;
+}
+
+export function toStored(report: ReportData): string {
+  return `${JSON.stringify({ format: STORED_FORMAT, ...fromReport(report) }, null, 2)}\n`;
 }
 
 function isObject(value: unknown): value is Row {
@@ -51,8 +51,7 @@ function stored(raw: unknown, where: string): { pass: boolean; value: number } {
   return { pass: raw["pass"], value };
 }
 
-/** Throws on a missing or unknown `format` and on a malformed baseline. */
-export function parseBaseline(text: string, source: string): Baseline {
+export function parseStored(text: string, source: string): Stored {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -60,21 +59,17 @@ export function parseBaseline(text: string, source: string): Baseline {
     throw new Error(`${source}: invalid JSON (${(cause as Error).message})`);
   }
   if (!isObject(raw)) throw new Error(`${source}: expected an object`);
-  if (raw["format"] !== BASELINE_FORMAT) {
+  if (raw["format"] !== STORED_FORMAT) {
     throw new Error(
-      `${source}: unknown format ${JSON.stringify(raw["format"])}, expected ${BASELINE_FORMAT}`,
+      `${source}: unknown format ${JSON.stringify(raw["format"])}, expected ${STORED_FORMAT}`,
     );
   }
   const name = raw["eval"];
   if (typeof name !== "string" || name === "") {
     throw new Error(`${source}: "eval" must be a non-empty string`);
   }
-  const passRate = raw["passRate"];
-  if (typeof passRate !== "number" || !Number.isFinite(passRate)) {
-    throw new Error(`${source}: "passRate" must be a finite number`);
-  }
   if (!isObject(raw["cases"])) throw new Error(`${source}: "cases" must be an object`);
-  const cases: Baseline["cases"] = {};
+  const cases: Stored["cases"] = {};
   for (const [caseName, checks] of Object.entries(raw["cases"])) {
     if (!isObject(checks)) throw new Error(`${source}: case "${caseName}" must be an object`);
     cases[caseName] = Object.fromEntries(
@@ -84,20 +79,20 @@ export function parseBaseline(text: string, source: string): Baseline {
       ]),
     );
   }
-  const baseline: Baseline = { eval: name, passRate, cases };
+  const run: Stored = { eval: name, cases };
   const about = raw["about"];
   if (about !== undefined) {
     if (!isObject(about)) throw new Error(`${source}: "about" must be an object`);
-    baseline.about = about;
+    run.about = about;
   }
-  return baseline;
+  return run;
 }
 
 /** Case × check pass flips. Cases or checks on one side only are not changes. */
-export function compare(baseline: Baseline, cases: readonly CaseResult[]): Change[] {
+export function flips(stored: Stored, cases: readonly CaseResult[]): Change[] {
   const changes: Change[] = [];
   for (const c of cases) {
-    const before = baseline.cases[c.name];
+    const before = stored.cases[c.name];
     if (before === undefined) continue;
     for (const [check, now] of Object.entries(c.checks)) {
       const was = before[check];
@@ -117,17 +112,33 @@ function detail(o: Outcome): string {
   return o.explanation === undefined ? shown : `${shown}: ${o.explanation}`;
 }
 
+function allowed(n: number, allow: number): string {
+  return `${n} (${allow} allowed)`;
+}
+
+function caseList(label: string, names: readonly string[] | undefined): string[] {
+  return names === undefined || names.length === 0 ? [] : [`${label}: ${names.join(", ")}`];
+}
+
 export function toMarkdown(report: ReportData): string {
   const names = Object.keys(report.checks);
+  const comparing = report.changes !== undefined;
   const lines = [
     `# eval: ${cell(report.name)}`,
     ``,
-    `- cases: ${report.total}, passed: ${report.passed} (${(report.passRate * 100).toFixed(1)}%)`,
+    `- cases: ${report.total}, passed: ${report.passed}`,
     `- result: ${report.ok ? "ok" : "FAILED"}`,
     ...(report.about === undefined ? [] : [`- about: ${cell(JSON.stringify(report.about))}`]),
-    ...(report.changes === undefined
-      ? []
-      : report.changes.map((c) => `- ${c.change}: ${cell(c.case)} / ${cell(c.check)}`)),
+    ...(report.changes ?? []).map((c) => `- ${c.change}: ${cell(c.case)} / ${cell(c.check)}`),
+    ...caseList("added", report.added).map((l) => `- ${cell(l)}`),
+    ...caseList("removed", report.removed).map((l) => `- ${cell(l)}`),
+    ``,
+    `| check | passed | misses |${comparing ? " drops |" : ""} result |`,
+    `| ----- | ------ | ------ |${comparing ? " ----- |" : ""} ------ |`,
+    ...Object.entries(report.checks).map(([name, t]) => {
+      const drop = t.drop === undefined ? "" : ` ${allowed(t.drop, t.allow.drop)} |`;
+      return `| ${cell(name)} | ${t.passed}/${t.counted} | ${allowed(t.missed, t.allow.miss)} |${drop} ${t.ok ? "ok" : "FAIL"} |`;
+    }),
     ``,
     `| case | ${names.map(cell).join(" | ")} |`,
     `| ---- | ${names.map(() => "----").join(" | ")} |`,
@@ -135,21 +146,33 @@ export function toMarkdown(report: ReportData): string {
   for (const c of report.cases) {
     const cells = names.map((n) => {
       const o = c.checks[n];
-      return o === undefined ? "" : `${o.pass ? "pass" : "FAIL"} ${cell(detail(o))}`;
+      return o === undefined ? "skip" : `${o.pass ? "pass" : "FAIL"} ${cell(detail(o))}`;
     });
     lines.push(`| ${cell(c.name)} | ${cells.join(" | ")} |`);
   }
   return lines.join("\n");
 }
 
-/** The console summary: per check passed/total, then any baseline changes. */
+function summaryLine(name: string, t: CheckResult, width: number): string {
+  const parts = [
+    `  ${name.padEnd(width)}  ${t.passed}/${t.counted}`,
+    `misses ${allowed(t.missed, t.allow.miss)}`,
+    ...(t.drop === undefined ? [] : [`drops ${allowed(t.drop, t.allow.drop)}`]),
+    ...(t.ok ? [] : ["FAILED"]),
+  ];
+  return parts.join("  ");
+}
+
+/** The console summary: per check passed/counted against its allowance, then changes. */
 export function toSummary(report: ReportData): string {
   const entries = Object.entries(report.checks);
   const width = Math.max(5, ...entries.map(([name]) => name.length));
   const lines = [
     `${report.name}: ${report.passed}/${report.total} cases passed${report.ok ? "" : " (FAILED)"}`,
-    ...entries.map(([name, t]) => `  ${name.padEnd(width)}  ${t.passed}/${t.total}`),
+    ...entries.map(([name, t]) => summaryLine(name, t, width)),
+    ...(report.changes ?? []).map((c) => `  ${c.change}: ${c.case} / ${c.check}`),
+    ...caseList("added", report.added).map((l) => `  ${l}`),
+    ...caseList("removed", report.removed).map((l) => `  ${l}`),
   ];
-  for (const c of report.changes ?? []) lines.push(`  ${c.change}: ${c.case} / ${c.check}`);
   return lines.join("\n");
 }

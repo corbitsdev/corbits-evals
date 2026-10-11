@@ -37,7 +37,7 @@ const report = await evaluate("port-battle", {
       pass: "A",
     }),
   },
-  passRate: 0,
+  allow: { battle: PAIRS.length },
   judge: localJev,
 });
 console.log(report.markdown());

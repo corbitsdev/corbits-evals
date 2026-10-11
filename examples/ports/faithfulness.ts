@@ -63,7 +63,7 @@ const report = await evaluate("port-faithfulness", {
       { options: CRITERIA, pass: "supported" },
     ),
   },
-  passRate: 0,
+  allow: { baseline_coverage: CASES.length, jev_faithfulness: CASES.length },
   judge: localJev,
 });
 console.log(report.markdown());

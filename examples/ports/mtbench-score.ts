@@ -35,7 +35,7 @@ const report = await evaluate("port-mtbench-score", {
       { levels: LEVELS, pass: "6: good" },
     ),
   },
-  passRate: 0,
+  allow: { jev_helpfulness: CASES.length },
   judge: localJev,
 });
 console.log(report.markdown());

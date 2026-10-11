@@ -3,7 +3,7 @@ import type { Trace } from "./runs.js";
 import { withTimeout } from "./timeout.js";
 import type { CaseResult, Outcome, Run } from "./types.js";
 
-export type NamedCase<I, E> = { name: string; input: I; expect?: E };
+export type NamedCase<I, E> = { name: string; input: I; expect?: E; skip?: readonly string[] };
 
 export type RunSpec<I, O, E> = {
   cases: readonly NamedCase<I, E>[];
@@ -91,7 +91,7 @@ async function runCase<I, O, E>(
   evalCase: NamedCase<I, E>,
 ): Promise<CaseResult<I, O, E>> {
   const started = Date.now();
-  const entries = Object.entries(spec.checks);
+  const entries = Object.entries(spec.checks).filter(([name]) => !evalCase.skip?.includes(name));
   const attempts: Record<string, Outcome[]> = {};
   for (const [name] of entries) attempts[name] = [];
   let last: Run<I, O, E> | undefined;
