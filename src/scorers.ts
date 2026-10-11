@@ -18,7 +18,7 @@ export function exactMatch(): Scorer<string, string> {
   };
 }
 
-/** F1 over tool-call names as a score. No trajectory is 0: silent tools must not pass. */
+/** F1 over `tool` and `step` names as a score. No trajectory is 0: silent tools must not pass. */
 export function toolCallF1(expectedTools: readonly string[]): Scorer {
   const expected = [...expectedTools].sort();
   return ({ kase, result }) => {
@@ -26,7 +26,7 @@ export function toolCallF1(expectedTools: readonly string[]): Scorer {
       return { result: score(0), explanation: `case "${kase.id}" produced no trajectory` };
     }
     const actual = result.trajectory
-      .filter((s) => s.kind === "tool")
+      .filter((s) => s.kind === "tool" || s.kind === "step")
       .map((s) => s.name)
       .sort();
     if (expected.length === 0 && actual.length === 0) {

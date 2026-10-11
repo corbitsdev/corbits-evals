@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { defineAgent } from "@intx/agent";
 import { defineWorkflow, step, type StepInvoker } from "@intx/workflow";
 
-import { success } from "../src/results.js";
+import { score, success } from "../src/results.js";
 import { defineEval, runEval } from "../src/runner.js";
 import { exactMatch, latencyBudget, toolCallF1 } from "../src/scorers.js";
 import type { Scorer } from "../src/types.js";
@@ -60,7 +60,6 @@ describe("fromIntxWorkflow", () => {
         scorers: {
           exact: exactMatch(),
           order: stepOrder(["drafter", "reviewer"]),
-          noTools: toolCallF1([]),
           fast: latencyBudget(5_000),
         },
       }),
@@ -69,6 +68,26 @@ describe("fromIntxWorkflow", () => {
     expect(kase?.error).toBeUndefined();
     expect(kase?.pass).toBe(true);
     expect(kase?.scorers["order"]?.explanation).toBe("drafter > reviewer");
+  });
+
+  test("toolCallF1 scores workflow steps by name", async () => {
+    const report = await runEval(
+      defineEval({
+        name: "workflow-f1",
+        dataset: [{ id: "refund", input: "refund me" }],
+        task: fromIntxWorkflow(pipeline, {
+          invokeStep,
+          output: (run) => String(run.outputs["review"]),
+        }),
+        scorers: {
+          steps: toolCallF1(["drafter", "reviewer"]),
+          wrong: toolCallF1(["drafter", "approver"]),
+        },
+      }),
+    );
+    const kase = report.cases[0];
+    expect(kase?.scorers["steps"]?.result).toEqual(score(1));
+    expect(kase?.scorers["wrong"]?.result).toEqual(score(0.5));
   });
 
   test("records per-step input, output and latency", async () => {
