@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { defineEval, runEval } from "../src/runner.js";
-import { diffReports, toJson, toJUnit, toMarkdown } from "../src/reports.js";
-import type { EvalReport, Scorer } from "../src/types.js";
+import { diffReports, parseReport, toJson, toJUnit, toMarkdown } from "../src/reports.js";
+import type { Scorer } from "../src/types.js";
 import { combineAll, exactMatch, latencyBudget } from "../src/scorers.js";
 import { score, success } from "../src/results.js";
 import { fromFunction } from "../src/tasks.js";
@@ -262,19 +262,27 @@ describe("runEval hardening", () => {
   });
 });
 
-describe("toJson / diffReports", () => {
+describe("toJson / parseReport / diffReports", () => {
   const dataset = [
     { id: "a", input: "hi", expected: "HI" },
     { id: "b", input: "yo", expected: "YO" },
     { id: "c", input: "no", expected: "NO" },
   ];
 
-  test("round-trips through JSON and diffs by case id", async () => {
+  test("a stored run loads back with its stamp and diffs by case id", async () => {
     const before = await runEval(
-      defineEval({ name: "d", dataset, task: upper, scorers: { exact: exactMatch() } }),
+      defineEval({
+        name: "d",
+        dataset,
+        task: upper,
+        scorers: { exact: exactMatch() },
+        metadata: { model: "m-1" },
+      }),
     );
-    const stored = JSON.parse(toJson(before)) as EvalReport & { format: number };
-    expect(stored.format).toBe(1);
+    const stored = parseReport(toJson(before));
+    expect(stored).toEqual(before);
+    expect(toMarkdown(stored)).toContain('- metadata: {"model":"m-1"}');
+    expect(Date.parse(stored.startedAt)).not.toBeNaN();
     const after = await runEval(
       defineEval({
         name: "d",
@@ -290,6 +298,31 @@ describe("toJson / diffReports", () => {
     expect(diff.removed).toEqual(["c"]);
     expect(diff.changed).toEqual([{ id: "b", before: 1, after: 0 }]);
     expect(diff.passRateDelta).toBeLessThan(0);
+  });
+
+  test("refuses unknown versions, malformed reports and different evals", async () => {
+    const report = await runEval(
+      defineEval({ name: "d", dataset, task: upper, scorers: { exact: exactMatch() } }),
+    );
+    const json = JSON.parse(toJson(report)) as Record<string, unknown>;
+    expect(() => parseReport(JSON.stringify({ ...json, format: 2 }), "base.json")).toThrow(
+      "base.json: unknown format 2",
+    );
+    expect(() => parseReport(JSON.stringify({ ...json, format: undefined }))).toThrow(
+      'missing "format"',
+    );
+    expect(() => parseReport(JSON.stringify({ ...json, cases: [{ id: "a" }] }))).toThrow(
+      "cases[0]",
+    );
+    const [kase] = report.cases;
+    const badLabel = { ...kase, scorers: { exact: { ...kase!.scorers["exact"], label: 1 } } };
+    expect(() => parseReport(JSON.stringify({ ...json, cases: [badLabel] }))).toThrow(
+      'scorer "exact": "label" must be a string',
+    );
+    const other = await runEval(
+      defineEval({ name: "e", dataset, task: upper, scorers: { exact: exactMatch() } }),
+    );
+    expect(() => diffReports(report, other)).toThrow('eval "d" with "e"');
   });
 });
 

@@ -30,6 +30,8 @@ export type EvalSpec<I = string, E = string> = {
   scorerTimeoutMs?: number;
   concurrency?: number;
   thresholds?: EvalThresholds;
+  /** Carried onto the report, e.g. the model id, so stored runs say what they measured. */
+  metadata?: Record<string, unknown>;
 };
 
 type Limits = Pick<EvalSpec, "name" | "repeats" | "concurrency" | "timeoutMs" | "scorerTimeoutMs">;
@@ -79,6 +81,7 @@ export function defineEval<I = string, E = string>(spec: EvalSpec<I, E>): EvalSp
 
 export async function runEval<I = string, E = string>(spec: EvalSpec<I, E>): Promise<EvalReport> {
   validate(spec);
+  const startedAt = new Date().toISOString();
   const repeats = positiveInt(spec, "repeats");
   const concurrency = positiveInt(spec, "concurrency");
   const cases = await mapPool(spec.dataset, concurrency, (kase) => runCase(spec, kase, repeats));
@@ -88,8 +91,9 @@ export async function runEval<I = string, E = string>(spec: EvalSpec<I, E>): Pro
   const thresholdsMet =
     (spec.thresholds?.passRate === undefined || passRate >= spec.thresholds.passRate) &&
     (spec.thresholds?.avgScore === undefined || avgScore >= spec.thresholds.avgScore);
-  return {
+  const report: EvalReport = {
     eval: spec.name,
+    startedAt,
     total: cases.length,
     passed,
     passRate,
@@ -97,6 +101,8 @@ export async function runEval<I = string, E = string>(spec: EvalSpec<I, E>): Pro
     thresholdsMet,
     cases,
   };
+  if (spec.metadata !== undefined) report.metadata = { ...spec.metadata };
+  return report;
 }
 
 async function runTask<I>(
