@@ -36,6 +36,14 @@ const spec = defineEval({
 console.log(toMarkdown(await runEval(spec)));
 ```
 
+## Install
+
+```sh
+bun add @corbits/evals
+```
+
+Bun only (>=1.2.0): the dataset loaders use `Bun.file`.
+
 ## Results and thresholds
 
 A scorer returns a `Result`, never pass/fail:
