@@ -478,6 +478,29 @@ describe("escalation", () => {
       explanation: 'escalated to "hedged" (credit 0.50)',
     });
   });
+
+  test("answers with non-word edges still match", async () => {
+    const check = ask("Is the task complete?", {
+      options: { "@done": "finished", open: "not finished" },
+      pass: "@done",
+    });
+    const judge = escalating(
+      {
+        type: "choice",
+        choice: "open",
+        probabilities: { "@done": 0.45, open: 0.55 },
+        confidence: 0.55,
+      },
+      async () => ({ type: "reply", reply: "I think: @done" }),
+    );
+    const { outcome } = await judged(check, judge);
+    expect(outcome).toEqual({
+      pass: true,
+      value: 1,
+      label: "@done",
+      explanation: 'escalated to "@done"',
+    });
+  });
 });
 
 describe("stored reports", () => {

@@ -426,11 +426,21 @@ function escalationPrompt(check: Ask | Sentence | string, run: Run, answers: str
   ].join("\n\n");
 }
 
-/** Longest match wins, so overlapping names resolve to the more specific one. */
+/**
+ * Longest match wins, so overlapping names resolve to the more specific one.
+ * Boundary assertions apply only at word-character edges: `\b` sits between
+ * two non-word characters where no boundary exists, so answers like "@done"
+ * or "50%" would otherwise never match an exact reply.
+ */
 function pickAnswer(reply: string, answers: string[]): string | undefined {
   const escaped = (answer: string) => answer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const edge = (answer: string, at: "head" | "tail") => {
+    const c = at === "head" ? answer.charAt(0) : answer.charAt(answer.length - 1);
+    return /[A-Za-z0-9_]/.test(c) ? "\\b" : "";
+  };
   for (const answer of [...answers].sort((a, b) => b.length - a.length)) {
-    if (new RegExp(`\\b${escaped(answer)}\\b`, "i").test(reply)) return answer;
+    const pattern = `${edge(answer, "head")}${escaped(answer)}${edge(answer, "tail")}`;
+    if (new RegExp(pattern, "i").test(reply)) return answer;
   }
   return undefined;
 }
