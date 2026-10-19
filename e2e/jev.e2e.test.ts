@@ -222,6 +222,17 @@ describe("thresholds", () => {
     await expect(judged({ question, yes: 0.2, no: 0.5 }, judge)).rejects.toThrow(
       "no must not exceed yes",
     );
+    // Even a hand-built ask (bypassing ask()) is validated at evaluate time.
+    await expect(
+      judged({ question: "Ready?", options: { a: "a" }, pass: ["a"], sure: 0 }, judge),
+    ).rejects.toThrow("sure must be in (0, 1]");
+    // A check-level `no` above the judge's `yes` clamps to the pass band instead
+    // of overlapping it: p=0.75 stays "yes" under defaults with no: 0.8.
+    const clamped = stubJev(noul(0.75)).judge;
+    expect((await judged({ question, no: 0.8 }, clamped)).outcome).toMatchObject({
+      pass: true,
+      label: "yes",
+    });
   });
 });
 

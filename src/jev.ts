@@ -171,9 +171,13 @@ function thresholdsFor(check: Ask | Sentence | string, judge: Judge): Resolved {
   const base = judge.thresholds ?? DEFAULTS;
   if (typeof check === "string") return base;
   const any = check as { sure?: number; yes?: number; no?: number };
+  const yes = any.yes ?? base.yes;
   return {
-    yes: any.yes ?? base.yes,
-    no: any.no ?? base.no,
+    yes,
+    // A check-level `no` above the merged `yes` would overlap the pass band.
+    // Clamping it keeps the band shape; the pass branch already wins the
+    // overlap, so no verdict changes.
+    no: Math.min(any.no ?? base.no, yes),
     sure: any.sure ?? base.sure,
   };
 }
@@ -182,11 +186,15 @@ function thresholdsFor(check: Ask | Sentence | string, judge: Judge): Resolved {
 export function checkThresholds(check: Ask | Sentence | string): void {
   if (typeof check === "string") return;
   const any = check as { sure?: number; yes?: number; no?: number };
-  for (const key of ["yes", "no", "sure"] as const) {
+  for (const key of ["yes", "no"] as const) {
     const value = any[key];
     if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > 1)) {
       throw new Error(`jev: ${key} must be in [0, 1]`);
     }
+  }
+  const sure = any.sure;
+  if (sure !== undefined && (!Number.isFinite(sure) || sure <= 0 || sure > 1)) {
+    throw new Error("jev: sure must be in (0, 1]");
   }
   if (any.yes !== undefined && any.no !== undefined && any.no > any.yes) {
     throw new Error("jev: no must not exceed yes");
