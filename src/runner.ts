@@ -1,17 +1,23 @@
 import { toOutcome } from "./checks.js";
+import { askJevBatch, type Ask, type Judge } from "./jev.js";
 import type { Trace } from "./runs.js";
 import { withTimeout } from "./timeout.js";
 import type { CaseResult, Outcome, Run } from "./types.js";
 
 export type NamedCase<I, E> = { name: string; input: I; expect?: E; skip?: readonly string[] };
 
+/** String and `ask` checks Jev answers in one call per attempt. */
+export type JevGroup = { judge: Judge; checks: Record<string, Ask | string> };
+
 export type RunSpec<I, O, E> = {
   cases: readonly NamedCase<I, E>[];
   run: (input: I, signal: AbortSignal) => Promise<Trace<O>>;
   checks: Record<string, (run: Run<I, O, E>) => unknown>;
+  /** Jev checks, answered as a group in one call. */
+  jev?: JevGroup;
   repeats: number;
   concurrency: number;
-  /** Bounds the run and each check per attempt. */
+  /** Bounds the run, each code check, and the Jev group per attempt. */
   timeoutMs?: number;
 };
 
@@ -68,6 +74,29 @@ async function runCheck<I, O, E>(
   }
 }
 
+/** One Jev call for the case's checks; a failure fails every one of them closed. */
+async function runJev(
+  group: JevGroup,
+  names: readonly string[],
+  run: Run,
+  timeoutMs: number | undefined,
+): Promise<Record<string, Outcome>> {
+  const selected = Object.fromEntries(
+    names.map((name) => [name, group.checks[name] as Ask | string]),
+  );
+  try {
+    const pending = askJevBatch(group.judge, selected, run);
+    return timeoutMs === undefined
+      ? await pending
+      : await withTimeout(pending, timeoutMs, `jev checks timed out after ${timeoutMs}ms`);
+  } catch (cause) {
+    const explanation = `jev threw: ${message(cause)}`;
+    return Object.fromEntries(
+      names.map((name) => [name, { pass: false, value: 0, explanation } as Outcome]),
+    );
+  }
+}
+
 function compileAttempts(attempts: readonly Outcome[]): Outcome {
   const first = attempts[0];
   if (first === undefined) return { pass: false, value: 0, explanation: "no attempts" };
@@ -91,9 +120,13 @@ async function runCase<I, O, E>(
   evalCase: NamedCase<I, E>,
 ): Promise<CaseResult<I, O, E>> {
   const started = Date.now();
-  const entries = Object.entries(spec.checks).filter(([name]) => !evalCase.skip?.includes(name));
+  const codeNames = Object.keys(spec.checks).filter((name) => !evalCase.skip?.includes(name));
+  const jevNames = Object.keys(spec.jev?.checks ?? {}).filter(
+    (name) => !evalCase.skip?.includes(name),
+  );
+  const names = [...codeNames, ...jevNames];
   const attempts: Record<string, Outcome[]> = {};
-  for (const [name] of entries) attempts[name] = [];
+  for (const name of names) attempts[name] = [];
   let last: Run<I, O, E> | undefined;
   let error: string | undefined;
   for (let attempt = 0; attempt < spec.repeats; attempt += 1) {
@@ -104,13 +137,21 @@ async function runCase<I, O, E>(
       break;
     }
     const run = last;
-    const outcomes = await Promise.all(
-      entries.map(([name, check]) => runCheck(name, check, run, spec.timeoutMs)),
-    );
-    entries.forEach(([name], i) => attempts[name]?.push(outcomes[i] as Outcome));
+    const [codeOutcomes, jevOutcomes] = await Promise.all([
+      Promise.all(
+        codeNames.map((name) =>
+          runCheck(name, spec.checks[name] as (r: Run<I, O, E>) => unknown, run, spec.timeoutMs),
+        ),
+      ),
+      spec.jev === undefined || jevNames.length === 0
+        ? Promise.resolve({} as Record<string, Outcome>)
+        : runJev(spec.jev, jevNames, run, spec.timeoutMs),
+    ]);
+    codeNames.forEach((name, i) => attempts[name]?.push(codeOutcomes[i] as Outcome));
+    for (const name of jevNames) attempts[name]?.push(jevOutcomes[name] as Outcome);
   }
   const checks: Record<string, Outcome> = {};
-  for (const [name] of entries) {
+  for (const name of names) {
     // A run error fails every check so partial repeats never pass a case.
     checks[name] =
       error === undefined

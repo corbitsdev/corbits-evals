@@ -87,18 +87,18 @@ const NO = 0.3;
 /** A choice or level picked with less probability than this is unsure and fails. */
 const SURE = 0.6;
 
-function toQuestion(check: Ask | string): Question {
-  if (typeof check === "string") return { id: "q", type: "boolean", instructions: check };
+function toQuestion(id: string, check: Ask | string): Question {
+  if (typeof check === "string") return { id, type: "boolean", instructions: check };
   if (check.options !== undefined) {
     return {
-      id: "q",
+      id,
       type: "choice",
       instructions: check.question,
       criteria: { ...check.options },
     };
   }
   return {
-    id: "q",
+    id,
     type: "score",
     instructions: check.question,
     criteria: [...(check.levels ?? [])],
@@ -150,22 +150,47 @@ function toOutcome(check: Ask | string, decision: Decision): Outcome {
   return outcome;
 }
 
-/** Fail-closed: transport fallbacks, thrown errors and missing decisions all fail. */
-export async function askJev(judge: Judge, check: Ask | string, run: Run): Promise<Outcome> {
+/**
+ * Answer every check in one Jev call, keyed by check name. Fail-closed:
+ * transport fallbacks, thrown errors and missing decisions all fail — a
+ * transport failure fails every check in the batch, a missing decision
+ * fails only its own.
+ */
+export async function askJevBatch(
+  judge: Judge,
+  checks: Record<string, Ask | string>,
+  run: Run,
+): Promise<Record<string, Outcome>> {
+  const names = Object.keys(checks);
   const state: Record<string, unknown> = { input: run.input, output: run.output };
   if (run.expect !== undefined) state["expect"] = run.expect;
   if (run.steps.length > 0) state["steps"] = run.steps;
+  const questions = names.map((id) => toQuestion(id, checks[id] as Ask | string));
   let out;
   try {
     out = await evaluate(
-      { state, questions: [toQuestion(check)], config: judge.config },
+      { state, questions, config: judge.config },
       judge.deps === undefined ? undefined : { deps: judge.deps },
     );
   } catch (cause) {
-    return failed(`jev threw: ${cause instanceof Error ? cause.message : String(cause)}`);
+    return failedAll(names, `jev threw: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
-  if (out.fallback) return failed(`jev fallback (${out.reason}): ${out.detail ?? "no detail"}`);
-  const decision = out.decisions[0];
-  if (decision === undefined) return failed("jev returned no decision");
-  return toOutcome(check, decision);
+  if (out.fallback) {
+    return failedAll(names, `jev fallback (${out.reason}): ${out.detail ?? "no detail"}`);
+  }
+  const decisions = new Map(out.decisions.map((decision) => [decision.id, decision]));
+  return Object.fromEntries(
+    names.map((name) => {
+      const decision = decisions.get(name);
+      const outcome =
+        decision === undefined
+          ? failed("jev returned no decision")
+          : toOutcome(checks[name] as Ask | string, decision);
+      return [name, outcome];
+    }),
+  );
+}
+
+function failedAll(names: readonly string[], explanation: string): Record<string, Outcome> {
+  return Object.fromEntries(names.map((name) => [name, failed(explanation)]));
 }
