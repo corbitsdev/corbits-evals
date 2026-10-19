@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { EvaluateDeps } from "@corbits/system-one";
 
 import {
@@ -66,7 +69,12 @@ describe("sentence checks", () => {
 
   test("one POST for the case's Jev checks with the run as state", async () => {
     const { outcome, bodies } = await answered({ type: "noul", noul: 0.9 }, question);
-    expect(outcome).toEqual({ pass: true, value: 0.9, label: "yes" });
+    expect(outcome).toEqual({
+      pass: true,
+      value: 0.9,
+      label: "yes",
+      probabilities: { yes: 0.9, no: 0.1 },
+    });
     expect(bodies).toHaveLength(1);
     expect(bodies[0]?.["state"]).toEqual({
       input: "refund?",
@@ -83,6 +91,7 @@ describe("sentence checks", () => {
       value: 0.5,
       label: "unsure",
       explanation: "unsure (p=0.50)",
+      probabilities: { yes: 0.5, no: 0.5 },
     });
     expect((await answered({ type: "noul", noul: 0.2 }, question)).outcome).toMatchObject({
       pass: false,
@@ -114,8 +123,16 @@ describe("batching", () => {
     });
     expect(bodies).toHaveLength(1);
     expect(Object.keys(bodies[0]?.["questions"] as object)).toEqual(["ready", "polite"]);
-    expect(report.cases[0]?.checks["ready"]).toEqual({ pass: true, value: 0.9, label: "yes" });
-    expect(report.cases[0]?.checks["polite"]).toEqual({ pass: true, value: 0.9, label: "yes" });
+    expect(report.cases[0]?.checks["ready"]).toMatchObject({
+      pass: true,
+      value: 0.9,
+      label: "yes",
+    });
+    expect(report.cases[0]?.checks["polite"]).toMatchObject({
+      pass: true,
+      value: 0.9,
+      label: "yes",
+    });
   });
 
   test("a transport failure fails every Jev check in the batch", async () => {
@@ -253,6 +270,8 @@ describe("ask", () => {
       pass: true,
       value: 0.9,
       label: "ready",
+      probabilities: { ready: 0.8, revise: 0.1, escalate: 0.1 },
+      confidence: 0.8,
     });
     expect((await answered(pick("revise", 0.1, 0.8), ready)).outcome).toMatchObject({
       pass: false,
@@ -284,6 +303,8 @@ describe("ask", () => {
       pass: true,
       value: 1,
       label: "great",
+      probabilities: { "0": 0.1, "1": 0.1, "2": 0.1, "3": 0.7 },
+      confidence: 0.7,
     });
     expect((await answered(graded(1, 0.7), helpful)).outcome).toMatchObject({
       pass: false,
@@ -300,5 +321,43 @@ describe("ask", () => {
     expect(() => ask("Ready?", { options: { ready: "yes" }, pass: "redy" })).toThrow('"redy"');
     expect(() => ask("Graded?", { levels: ["only"], pass: "only" })).toThrow("2 to 10");
     expect(() => ask(" ", { options: { a: "a" }, pass: "a" })).toThrow("needs a question");
+  });
+});
+
+describe("stored reports", () => {
+  test("a saved run keeps the distribution", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "jev-e2e-"));
+    const path = join(dir, "run.json");
+    try {
+      const pick = {
+        type: "choice",
+        choice: "ready",
+        probabilities: { ready: 0.8, revise: 0.1, escalate: 0.1 },
+        confidence: 0.8,
+      };
+      await evaluate("jev", {
+        run: (input: string) => `reply to ${input}`,
+        cases: [{ input: "refund?" }],
+        checks: {
+          judged: ask("Ready to send?", {
+            options: { ready: "send", revise: "work", escalate: "human" },
+            pass: "ready",
+          }),
+        },
+        judge: stubJev(pick).judge,
+        save: path,
+      });
+      const stored = JSON.parse(await Bun.file(path).text()) as {
+        cases: Record<string, Record<string, Record<string, unknown>>>;
+      };
+      expect(stored.cases["refund?"]?.["judged"]).toEqual({
+        pass: true,
+        value: 0.8,
+        probabilities: { ready: 0.8, revise: 0.1, escalate: 0.1 },
+        confidence: 0.8,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

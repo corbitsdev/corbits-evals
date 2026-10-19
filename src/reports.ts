@@ -9,7 +9,15 @@ export type ReportData = Omit<Report, "markdown">;
 export type Stored = {
   eval: string;
   about?: Record<string, unknown>;
-  cases: Record<string, Record<string, { pass: boolean; value: number }>>;
+  cases: Record<string, Record<string, StoredRow>>;
+};
+
+/** One check's stored answer: the outcome plus a Jev distribution when present. */
+export type StoredRow = {
+  pass: boolean;
+  value: number;
+  probabilities?: Record<string, number>;
+  confidence?: number;
 };
 
 const STORED_FORMAT = 1;
@@ -22,7 +30,21 @@ export function fromReport(report: ReportData): Stored {
   const cases: Stored["cases"] = {};
   for (const c of report.cases) {
     cases[c.name] = Object.fromEntries(
-      Object.entries(c.checks).map(([name, o]) => [name, { pass: o.pass, value: round(o.value) }]),
+      Object.entries(c.checks).map(([name, o]) => [
+        name,
+        {
+          pass: o.pass,
+          value: round(o.value),
+          ...(o.probabilities === undefined
+            ? {}
+            : {
+                probabilities: Object.fromEntries(
+                  Object.entries(o.probabilities).map(([key, v]) => [key, round(v)]),
+                ),
+              }),
+          ...(o.confidence === undefined ? {} : { confidence: round(o.confidence) }),
+        },
+      ]),
     );
   }
   return {
@@ -40,7 +62,7 @@ function isObject(value: unknown): value is Row {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function stored(raw: unknown, where: string): { pass: boolean; value: number } {
+function stored(raw: unknown, where: string): StoredRow {
   if (!isObject(raw) || typeof raw["pass"] !== "boolean") {
     throw new Error(`${where}: "pass" must be a boolean`);
   }
@@ -48,7 +70,27 @@ function stored(raw: unknown, where: string): { pass: boolean; value: number } {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`${where}: "value" must be a finite number`);
   }
-  return { pass: raw["pass"], value };
+  const row: StoredRow = { pass: raw["pass"], value };
+  const probabilities = raw["probabilities"];
+  if (probabilities !== undefined) {
+    if (!isObject(probabilities)) {
+      throw new Error(`${where}: "probabilities" must be an object`);
+    }
+    for (const [key, v] of Object.entries(probabilities)) {
+      if (typeof v !== "number" || !Number.isFinite(v)) {
+        throw new Error(`${where}: probabilities.${key} must be a finite number`);
+      }
+    }
+    row.probabilities = probabilities as Record<string, number>;
+  }
+  const confidence = raw["confidence"];
+  if (confidence !== undefined) {
+    if (typeof confidence !== "number" || !Number.isFinite(confidence)) {
+      throw new Error(`${where}: "confidence" must be a finite number`);
+    }
+    row.confidence = confidence;
+  }
+  return row;
 }
 
 export function parseStored(text: string, source: string): Stored {

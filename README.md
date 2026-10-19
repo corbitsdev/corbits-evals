@@ -132,7 +132,8 @@ are not run or counted.
 `EvalFailure` naming the limit each failing check broke and its failed
 cases; `.report` holds every result.
 
-A stored run is each case × check pass and value plus `about`, no times.
+A stored run is each case × check pass and value — plus a Jev check's
+probability distribution and confidence — and `about`, no times.
 `compare` only reads; a missing file skips drops. `save` only writes, on
 every run. One path for both compares with the last run, then replaces
 it. `compare` also takes a report from an earlier `evaluate` of the same
