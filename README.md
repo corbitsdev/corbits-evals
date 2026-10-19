@@ -42,7 +42,8 @@ returned.
   and passes only at 1; return a boolean to pick your own threshold, or
   `{ pass, value, explanation }` for detail.
 - **Sentence**: a yes/no question for Jev about the run. Passes at
-  p(yes) >= 0.7, fails at <= 0.3, fails as `unsure (p=…)` in between.
+  p(yes) >= `yes`, fails at <= `no` (0.7 / 0.3 by default), fails as
+  `unsure (p=…)` in between. `{ question, yes, no }` sets its own bars.
 - **Helpers**:
 
 | helper                      | passes when                                                               |
@@ -59,7 +60,8 @@ returned.
 
 `mentions` and `avoids` also take `(r) => words` for per-case words.
 `mentions` and `ranSteps` take `{ atLeast }` to pass on partial credit.
-`ask` fails as unsure when Jev's top probability is below 0.6.
+`ask` fails as unsure when Jev's top probability is below `sure`
+(0.6 by default; a check's own `sure` wins).
 
 A check that throws, hangs past `timeout`, or returns anything else fails
 itself closed; its siblings still run. Jev transport failures fail closed.
@@ -69,6 +71,13 @@ Jev sees `{ input, output, expect, steps }`, and a case's string and
 `judge: jev({ endpoint, model, apiKey, timeout })`; `endpoint` is
 `"official"` (default), `"gateway"` or a URL. Without an `apiKey` the
 key comes from the environment as `@corbits/system-one` reads it.
+
+Thresholds: a yes/no check passes at p(yes) >= `yes` and fails at
+p(yes) <= `no` (0.7 / 0.3); `ask` fails as unsure when its top
+probability is under `sure` (0.6). Retune them per judge with
+`jev({ thresholds: { yes, no, sure } })` or per check as above.
+Thresholds are tuned to a judge version, so pin `model` — e.g.
+`jev({ model: "jev-1.13.0" })` — when they must stay stable.
 
 ## Runs
 

@@ -24,6 +24,15 @@ export {
   type Words,
 } from "./checks.js";
 export { EvalFailure, evaluate, type Allow, type Check, type EvaluateOptions } from "./evaluate.js";
-export { ask, jev, type Ask, type JevOptions, type Judge } from "./jev.js";
+export {
+  ask,
+  jev,
+  DEFAULTS,
+  type Ask,
+  type JevOptions,
+  type Judge,
+  type Sentence,
+  type Thresholds,
+} from "./jev.js";
 export type { Runnable } from "./runs.js";
 export type { Duration } from "./timeout.js";

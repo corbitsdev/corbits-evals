@@ -1,5 +1,5 @@
 import { toOutcome } from "./checks.js";
-import { askJevBatch, type Ask, type Judge } from "./jev.js";
+import { askJevBatch, type Ask, type Judge, type Sentence } from "./jev.js";
 import type { Trace } from "./runs.js";
 import { withTimeout } from "./timeout.js";
 import type { CaseResult, Outcome, Run } from "./types.js";
@@ -7,7 +7,7 @@ import type { CaseResult, Outcome, Run } from "./types.js";
 export type NamedCase<I, E> = { name: string; input: I; expect?: E; skip?: readonly string[] };
 
 /** String and `ask` checks Jev answers in one call per attempt. */
-export type JevGroup = { judge: Judge; checks: Record<string, Ask | string> };
+export type JevGroup = { judge: Judge; checks: Record<string, Ask | Sentence | string> };
 
 export type RunSpec<I, O, E> = {
   cases: readonly NamedCase<I, E>[];
@@ -82,7 +82,7 @@ async function runJev(
   timeoutMs: number | undefined,
 ): Promise<Record<string, Outcome>> {
   const selected = Object.fromEntries(
-    names.map((name) => [name, group.checks[name] as Ask | string]),
+    names.map((name) => [name, group.checks[name] as Ask | Sentence | string]),
   );
   try {
     const pending = askJevBatch(group.judge, selected, run);

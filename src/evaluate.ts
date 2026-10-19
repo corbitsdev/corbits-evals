@@ -1,6 +1,6 @@
 import { matches } from "./checks.js";
 import { fromJsonl } from "./datasets.js";
-import { jev, type Ask, type Judge } from "./jev.js";
+import { checkThresholds, jev, type Ask, type Judge, type Sentence } from "./jev.js";
 import {
   flips,
   fromReport,
@@ -16,7 +16,11 @@ import { toMs, type Duration } from "./timeout.js";
 import type { Case, CaseResult, CheckFn, CheckResult, Report, Run } from "./types.js";
 
 /** Code, a yes/no question for Jev, or `ask(...)`. */
-export type Check<I = unknown, O = unknown, E = unknown> = CheckFn<I, O, E> | string | Ask;
+export type Check<I = unknown, O = unknown, E = unknown> =
+  | CheckFn<I, O, E>
+  | string
+  | Ask
+  | Sentence;
 
 /** Cases a check may miss, or `{ miss, drop }`; both default to 0. */
 export type Allow = number | { miss?: number; drop?: number };
@@ -144,11 +148,14 @@ function named<I, E>(
 function toCheckParts<I, O, E>(
   name: string,
   checks: Record<string, Check<I, O, E>>,
-): { code: Record<string, (run: Run<I, O, E>) => unknown>; jev: Record<string, Ask | string> } {
+): {
+  code: Record<string, (run: Run<I, O, E>) => unknown>;
+  jev: Record<string, Ask | Sentence | string>;
+} {
   const entries = Object.entries(checks);
   if (entries.length === 0) throw new Error(`eval "${name}" has no checks`);
   const code: Record<string, (run: Run<I, O, E>) => unknown> = {};
-  const jev: Record<string, Ask | string> = {};
+  const jev: Record<string, Ask | Sentence | string> = {};
   for (const [key, check] of entries) {
     if (typeof check === "function") {
       code[key] = check;
@@ -157,7 +164,8 @@ function toCheckParts<I, O, E>(
     const valid =
       typeof check === "string" ? check.trim() !== "" : typeof check?.question === "string";
     if (!valid) throw new Error(`eval "${name}": check "${key}" is not a check`);
-    jev[key] = check as Ask | string;
+    checkThresholds(check as Ask | Sentence);
+    jev[key] = check as Ask | Sentence | string;
   }
   return { code, jev };
 }
