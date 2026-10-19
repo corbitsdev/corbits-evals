@@ -317,6 +317,41 @@ describe("ask", () => {
     });
   });
 
+  test("credit options pass at passAt on the picked credit", async () => {
+    const handled = ask("What did the reply do with the missing figure?", {
+      options: { left_out: 1, hedged: 0.5, invented: 0 },
+      passAt: 1,
+    });
+    const pick = (choice: string) => ({
+      type: "choice",
+      choice,
+      probabilities: { left_out: 0.6, hedged: 0.25, invented: 0.15 },
+      confidence: 0.6,
+    });
+    expect((await answered(pick("left_out"), handled)).outcome).toEqual({
+      pass: true,
+      value: 1,
+      label: "left_out",
+      probabilities: { left_out: 0.6, hedged: 0.25, invented: 0.15 },
+      confidence: 0.6,
+    });
+    expect((await answered(pick("hedged"), handled)).outcome).toMatchObject({
+      pass: false,
+      value: 0.5,
+      explanation: 'picked "hedged" (credit 0.50)',
+    });
+    const lenient = ask("What did the reply do with the missing figure?", {
+      options: { left_out: 1, hedged: 0.5, invented: 0 },
+      passAt: 0.5,
+    });
+    expect((await answered(pick("hedged"), lenient)).outcome?.pass).toBe(true);
+    const bad = (spec: Record<string, unknown>) => ask("X", spec as unknown as never);
+    expect(() => bad({ options: { a: 1 }, pass: "a" })).toThrow("passAt, not pass");
+    expect(() => bad({ options: { a: "a", b: 1 }, passAt: 1 })).toThrow(
+      "all descriptions or all credits",
+    );
+  });
+
   test("misconfiguration throws at definition", () => {
     expect(() => ask("Ready?", { options: { ready: "yes" }, pass: "redy" })).toThrow('"redy"');
     expect(() => ask("Graded?", { levels: ["only"], pass: "only" })).toThrow("2 to 10");

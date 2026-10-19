@@ -79,9 +79,13 @@ export function jev(options: JevOptions = {}): Judge {
 /** A Jev question with named answers. A plain string check is the yes/no case. */
 export type Ask = {
   readonly question: string;
-  readonly options?: Readonly<Record<string, string>>;
+  /** Descriptions (pass-set form) or credits in 0..1 (credit form). */
+  readonly options?: Readonly<Record<string, string | number>>;
   readonly levels?: readonly string[];
-  readonly pass: readonly string[];
+  /** Pass-set form: Jev must pick one of these. */
+  readonly pass?: readonly string[];
+  /** Credit form: the picked option's credit must reach this (default 1). */
+  readonly passAt?: number;
   /** Overrides the judge's `sure` bar. */
   readonly sure?: number;
 };
@@ -102,6 +106,11 @@ export function ask(
     sure?: number;
   },
 ): Ask;
+/** Pick one option; pass when the picked option's credit reaches `passAt`. */
+export function ask(
+  question: string,
+  spec: { options: Readonly<Record<string, number>>; passAt?: number; sure?: number },
+): Ask;
 /** Grade on ordered levels, lowest first; pass at `pass` or above. */
 export function ask(
   question: string,
@@ -110,31 +119,58 @@ export function ask(
 export function ask(
   question: string,
   spec: {
-    options?: Readonly<Record<string, string>>;
+    options?: Readonly<Record<string, string | number>>;
     levels?: readonly string[];
-    pass: string | readonly string[];
+    pass?: string | readonly string[];
+    passAt?: number;
     sure?: number;
   },
 ): Ask {
   if (question.trim() === "") throw new Error("ask needs a question");
-  const pass = typeof spec.pass === "string" ? [spec.pass] : spec.pass;
-  const names = spec.options === undefined ? spec.levels : Object.keys(spec.options);
-  if (names === undefined) throw new Error("ask needs options or levels");
-  if (spec.levels !== undefined && (spec.levels.length < 2 || spec.levels.length > 10)) {
-    throw new Error("ask: levels must have 2 to 10 entries");
-  }
-  if (names.length === 0) throw new Error("ask: options must not be empty");
-  if (pass.length === 0) throw new Error("ask: pass names no answer");
-  for (const name of pass) {
-    if (!names.includes(name)) throw new Error(`ask: pass "${name}" is not an answer`);
-  }
   if (spec.sure !== undefined && (!Number.isFinite(spec.sure) || spec.sure <= 0 || spec.sure > 1)) {
     throw new Error("ask: sure must be in (0, 1]");
   }
   const sure = spec.sure === undefined ? {} : { sure: spec.sure };
-  return spec.options === undefined
-    ? { question, levels: names, pass, ...sure }
-    : { question, options: spec.options, pass, ...sure };
+  const levels = spec.levels;
+  if (spec.options === undefined) {
+    if (levels === undefined) throw new Error("ask needs options or levels");
+    if (levels.length < 2 || levels.length > 10) {
+      throw new Error("ask: levels must have 2 to 10 entries");
+    }
+    if (spec.passAt !== undefined) throw new Error("ask: passAt needs credit options");
+    const pass = typeof spec.pass === "string" ? [spec.pass] : spec.pass;
+    if (pass === undefined || pass.length === 0) throw new Error("ask: pass names no answer");
+    for (const name of pass) {
+      if (!levels.includes(name)) throw new Error(`ask: pass "${name}" is not an answer`);
+    }
+    return { question, levels, pass, ...sure };
+  }
+  const entries = Object.entries(spec.options);
+  if (entries.length === 0) throw new Error("ask: options must not be empty");
+  const credits = entries.every(([, v]) => typeof v === "number");
+  if (!credits && !entries.every(([, v]) => typeof v === "string")) {
+    throw new Error("ask: options must be all descriptions or all credits");
+  }
+  if (credits) {
+    if (spec.pass !== undefined) throw new Error("ask: credit options pass by passAt, not pass");
+    const passAt = spec.passAt ?? 1;
+    if (!Number.isFinite(passAt) || passAt <= 0 || passAt > 1) {
+      throw new Error("ask: passAt must be in (0, 1]");
+    }
+    for (const [name, credit] of entries) {
+      if (typeof credit !== "number" || !Number.isFinite(credit) || credit < 0 || credit > 1) {
+        throw new Error(`ask: credit "${name}" must be in [0, 1]`);
+      }
+    }
+    return { question, options: { ...spec.options }, passAt, ...sure };
+  }
+  if (spec.passAt !== undefined) throw new Error("ask: passAt needs credit options");
+  const pass = typeof spec.pass === "string" ? [spec.pass] : spec.pass;
+  if (pass === undefined || pass.length === 0) throw new Error("ask: pass names no answer");
+  for (const name of pass) {
+    if (!(name in spec.options)) throw new Error(`ask: pass "${name}" is not an answer`);
+  }
+  return { question, options: { ...spec.options }, pass, ...sure };
 }
 
 function toQuestion(id: string, check: Ask | Sentence | string): Question {
@@ -144,7 +180,9 @@ function toQuestion(id: string, check: Ask | Sentence | string): Question {
       id,
       type: "choice",
       instructions: check.question,
-      criteria: { ...check.options },
+      criteria: Object.fromEntries(
+        Object.entries(check.options).map(([name, v]) => [name, typeof v === "number" ? name : v]),
+      ),
     };
   }
   if ("levels" in check && check.levels !== undefined) {
@@ -227,10 +265,14 @@ function toOutcome(check: Ask | Sentence | string, decision: Decision, judge: Ju
   const ask = check as Ask;
   const top = Math.max(...Object.values(decision.probabilities));
   if (decision.type === "choice") {
-    const value = Math.min(
-      1,
-      ask.pass.reduce((sum, name) => sum + (decision.probabilities[name] ?? 0), 0),
-    );
+    const raw = ask.options?.[decision.choice];
+    const credit = typeof raw === "number" ? raw : undefined;
+    const value =
+      credit ??
+      Math.min(
+        1,
+        (ask.pass ?? []).reduce((sum, name) => sum + (decision.probabilities[name] ?? 0), 0),
+      );
     if (top < t.sure) {
       return {
         ...failed(`unsure (p=${p(top)} for "${decision.choice}")`),
@@ -239,9 +281,17 @@ function toOutcome(check: Ask | Sentence | string, decision: Decision, judge: Ju
         ...d,
       };
     }
-    const pass = ask.pass.includes(decision.choice);
+    const pass =
+      credit !== undefined
+        ? credit >= (ask.passAt ?? 1)
+        : (ask.pass?.includes(decision.choice) ?? false);
     const outcome: Outcome = { pass, value, label: decision.choice, ...d };
-    if (!pass) outcome.explanation = `picked "${decision.choice}"`;
+    if (!pass) {
+      outcome.explanation =
+        credit === undefined
+          ? `picked "${decision.choice}"`
+          : `picked "${decision.choice}" (credit ${p(credit)})`;
+    }
     return outcome;
   }
   const levels = ask.levels ?? [];
@@ -250,7 +300,7 @@ function toOutcome(check: Ask | Sentence | string, decision: Decision, judge: Ju
   const value = decision.score / (levels.length - 1);
   if (top < t.sure)
     return { ...failed(`unsure (p=${p(top)} for "${level}")`), value, label: level, ...d };
-  const pass = index >= levels.indexOf(ask.pass[0] ?? "");
+  const pass = index >= levels.indexOf(ask.pass?.[0] ?? "");
   const outcome: Outcome = { pass, value, label: level, ...d };
   if (!pass) outcome.explanation = `graded "${level}"`;
   return outcome;
