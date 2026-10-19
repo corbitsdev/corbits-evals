@@ -1,0 +1,131 @@
+import { describe, expect, test } from "bun:test";
+import type { EvaluateDeps } from "@corbits/system-one";
+
+import { ask, calibrate, jev } from "../src/index.js";
+
+function stubDeps(fetch: EvaluateDeps["fetch"]): EvaluateDeps {
+  return {
+    fetch,
+    scheduler: {
+      setTimeout: ((fn: () => void, ms: number) => {
+        const t = setTimeout(fn, ms);
+        return () => clearTimeout(t);
+      }) as EvaluateDeps["scheduler"]["setTimeout"],
+      now: () => Date.now(),
+    },
+  };
+}
+
+/** Answers yes/no questions with the input's probability; choice questions pick ready/revise by it. */
+function stubCalibration(byInput: Record<string, number>) {
+  const fetch = (async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as {
+      state: { input: string };
+      questions: Record<string, { type: string }>;
+    };
+    const p = byInput[body.state.input] ?? 0.5;
+    const answers = Object.fromEntries(
+      Object.entries(body.questions).map(([id, q]) => [
+        id,
+        q.type === "choice"
+          ? {
+              type: "choice",
+              choice: p >= 0.5 ? "ready" : "revise",
+              probabilities: { ready: p, revise: Math.round((1 - p) * 100) / 100 },
+              confidence: p,
+            }
+          : { type: "noul", noul: p },
+      ]),
+    );
+    return new Response(JSON.stringify({ model: "jev-test", answers }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as EvaluateDeps["fetch"];
+  return jev({ apiKey: "test-key", deps: stubDeps(fetch) });
+}
+
+describe("calibrate", () => {
+  const question = "Is this reply ready to send to the customer?";
+
+  test("sweeps thresholds and recommends the most permissive clean bar", async () => {
+    // a: confidently yes (label yes), b: leans no (label no), c: confidently no (label no).
+    const judge = stubCalibration({ a: 0.9, b: 0.4, c: 0.1 });
+    const result = await calibrate("cal", {
+      run: (input: string) => `reply to ${input}`,
+      cases: [
+        { input: "a", labels: { ready: true } },
+        { input: "b", labels: { ready: false } },
+        { input: "c", labels: { ready: false } },
+      ],
+      checks: { ready: question },
+      judge,
+    });
+    expect(result.total).toBe(3);
+    const t = result.checks["ready"] as {
+      rows: { threshold: number; agrees: number; unsure: number; disagrees: number }[];
+      recommended: number;
+      setting: string;
+    };
+    // Every verdict agrees at 0.5: yes stays yes, 0.4 and 0.1 fall in "no".
+    expect(t.rows[0]).toEqual({ threshold: 0.5, agrees: 3, unsure: 0, disagrees: 0 });
+    // At 0.95 the mirrored no bar is 0.05, so every case lands unsure — high bars
+    // trade disagreements for unsure, never for silent agreement.
+    const top = t.rows[t.rows.length - 1] as {
+      threshold: number;
+      agrees: number;
+      unsure: number;
+      disagrees: number;
+    };
+    expect(top).toEqual({ threshold: 0.95, agrees: 0, unsure: 3, disagrees: 0 });
+    expect(t.recommended).toBe(0.5);
+    expect(t.setting).toBe("{ yes: 0.5, no: 0.5 }");
+    expect(result.markdown()).toContain("| 0.5 | 3 | 0 | 0 |");
+    expect(result.markdown()).toContain("recommended: `{ yes: 0.5, no: 0.5 }`");
+  });
+
+  test("an ask check sweeps the sure bar instead", async () => {
+    const judge = stubCalibration({ a: 0.9, b: 0.9, c: 0.9 });
+    const result = await calibrate("cal", {
+      run: (input: string) => `reply to ${input}`,
+      cases: [
+        { input: "a", labels: { ready: true } },
+        { input: "b", labels: { ready: true } },
+        { input: "c", labels: { ready: false } },
+      ],
+      checks: {
+        ready: ask("Ready to send?", {
+          options: { ready: "send", revise: "work" },
+          pass: "ready",
+        }),
+      },
+      judge,
+    });
+    const t = result.checks["ready"] as {
+      rows: { threshold: number; agrees: number; unsure: number; disagrees: number }[];
+      recommended: number;
+    };
+    // Top probability 0.9 clears every sure bar up to 0.9, so case c confidently disagrees there;
+    // at 0.95 all three land unsure and nothing disagrees.
+    expect(t.rows[0]).toEqual({ threshold: 0.5, agrees: 2, unsure: 0, disagrees: 1 });
+    expect(t.rows[t.rows.length - 1]).toEqual({
+      threshold: 0.95,
+      agrees: 0,
+      unsure: 3,
+      disagrees: 0,
+    });
+    expect(t.recommended).toBe(0.95);
+  });
+
+  test("every check needs a label on every case", async () => {
+    const judge = stubCalibration({ a: 0.9 });
+    await expect(
+      calibrate("cal", {
+        run: (input: string) => input,
+        cases: [{ input: "a", labels: {} }],
+        checks: { ready: question },
+        judge,
+      }),
+    ).rejects.toThrow('case "a" has no label for check "ready"');
+  });
+});

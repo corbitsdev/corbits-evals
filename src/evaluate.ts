@@ -111,7 +111,7 @@ function toAllowances(
   );
 }
 
-function caseName(evalCase: Case<unknown, unknown>): string {
+export function caseName(evalCase: Case<unknown, unknown>): string {
   if (evalCase.name !== undefined) return evalCase.name;
   return typeof evalCase.input === "string"
     ? evalCase.input

@@ -25,7 +25,7 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-async function runOnce<I, O, E>(
+export async function runOnce<I, O, E>(
   spec: RunSpec<I, O, E>,
   evalCase: NamedCase<I, E>,
 ): Promise<Run<I, O, E>> {
@@ -178,7 +178,7 @@ export async function runCases<I, O, E>(spec: RunSpec<I, O, E>): Promise<CaseRes
   return mapPool(spec.cases, spec.concurrency, (evalCase) => runCase(spec, evalCase));
 }
 
-async function mapPool<T, R>(
+export async function mapPool<T, R>(
   items: readonly T[],
   concurrency: number,
   fn: (item: T) => Promise<R>,
