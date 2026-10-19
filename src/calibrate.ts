@@ -60,6 +60,20 @@ function isUnsure(o: Outcome): boolean {
 }
 
 /**
+ * The sweep owns the bars: a check's own `sure`/`yes`/`no` overrides would
+ * outrank every candidate judge (check-level wins over judge-level in
+ * `thresholdsFor`), making every row identical and the recommendation a no-op.
+ */
+function sweepable(check: Ask | Sentence | string): Ask | Sentence | string {
+  if (typeof check === "string") return check;
+  const copy: Record<string, unknown> = { ...check };
+  delete copy["sure"];
+  delete copy["yes"];
+  delete copy["no"];
+  return copy as Ask | Sentence;
+}
+
+/**
  * Run a labeled sample through Jev once and sweep the pass bars, so
  * thresholds become a per-workload choice instead of a constant. Yes/no
  * checks sweep `yes` with `no` mirrored; `ask` sweeps `sure`.
@@ -135,7 +149,7 @@ export async function calibrate<I, O, E = O>(
       let unsure = 0;
       let disagrees = 0;
       for (const s of sample) {
-        const o = toOutcome(check, s.decision, judge);
+        const o = toOutcome(sweepable(check), s.decision, judge);
         if (isUnsure(o)) unsure += 1;
         else if (o.pass === s.label) agrees += 1;
         else disagrees += 1;

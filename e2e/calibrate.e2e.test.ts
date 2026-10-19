@@ -117,6 +117,38 @@ describe("calibrate", () => {
     expect(t.recommended).toBe(0.95);
   });
 
+  test("a check's own bars never pin the sweep", async () => {
+    // The check carries sure: 0.6 — without stripping it, every grid row would
+    // evaluate at 0.6 and the sweep would show no sensitivity at all.
+    const judge = stubCalibration({ a: 0.9, b: 0.9 });
+    const result = await calibrate("cal", {
+      run: (input: string) => `reply to ${input}`,
+      cases: [
+        { input: "a", labels: { ready: true } },
+        { input: "b", labels: { ready: false } },
+      ],
+      checks: {
+        ready: ask("Ready to send?", {
+          options: { ready: "send", revise: "work" },
+          pass: "ready",
+          sure: 0.6,
+        }),
+      },
+      judge,
+    });
+    const t = result.checks["ready"] as {
+      rows: { threshold: number; agrees: number; unsure: number; disagrees: number }[];
+    };
+    // Case b (label no) confidently disagrees at low bars, turns unsure at 0.95.
+    expect(t.rows[0]).toEqual({ threshold: 0.5, agrees: 1, unsure: 0, disagrees: 1 });
+    expect(t.rows[t.rows.length - 1]).toEqual({
+      threshold: 0.95,
+      agrees: 0,
+      unsure: 2,
+      disagrees: 0,
+    });
+  });
+
   test("every check needs a label on every case", async () => {
     const judge = stubCalibration({ a: 0.9 });
     await expect(
