@@ -80,6 +80,18 @@ probability is under `sure` (0.6). Retune them per judge with
 Thresholds are tuned to a judge version, so pin `model` — e.g.
 `jev({ model: "jev-1.13.0" })` — when they must stay stable.
 
+Escalation: `sure` doubles as the escalation gate. Give the judge an
+agent — `jev({ escalate: agent })`, anything with
+`send(prompt)` returning `{ type: "reply", reply }` or
+`{ type: "suspended" }`, e.g. an `@intx/agent` agent from a `@corbits/*`
+adapter — and every unsure decision is re-asked with the exact answer
+space. The reply goes through the same pass rules minus the confidence
+gate, so a primary unsure can still fail after escalation. A thrown,
+suspended, or off-answer-space reply fails the case closed. Validate the
+escalated model per workload too: Jev's unsure says nothing about the
+fallback's accuracy, and reasoning models may answer in prose the answer
+space cannot absorb — those fail closed by design.
+
 ## Runs
 
 - **Function**: `(input, signal) => output`. `signal` aborts on `timeout`.
