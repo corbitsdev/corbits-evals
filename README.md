@@ -64,7 +64,8 @@ returned.
 A check that throws, hangs past `timeout`, or returns anything else fails
 itself closed; its siblings still run. Jev transport failures fail closed.
 
-Jev sees `{ input, output, expect, steps }`. Configure it with
+Jev sees `{ input, output, expect, steps }`, and a case's string and
+`ask` checks answer in one call. Configure it with
 `judge: jev({ endpoint, model, apiKey, timeout })`; `endpoint` is
 `"official"` (default), `"gateway"` or a URL. Without an `apiKey` the
 key comes from the environment as `@corbits/system-one` reads it.

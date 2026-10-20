@@ -1,6 +1,6 @@
 import { matches } from "./checks.js";
 import { fromJsonl } from "./datasets.js";
-import { askJev, jev, type Ask, type Judge } from "./jev.js";
+import { jev, type Ask, type Judge } from "./jev.js";
 import {
   flips,
   fromReport,
@@ -141,22 +141,25 @@ function named<I, E>(
   });
 }
 
-function toCheckFns<I, O, E>(
+function toCheckParts<I, O, E>(
   name: string,
   checks: Record<string, Check<I, O, E>>,
-  judge: () => Judge,
-): Record<string, (run: Run<I, O, E>) => unknown> {
+): { code: Record<string, (run: Run<I, O, E>) => unknown>; jev: Record<string, Ask | string> } {
   const entries = Object.entries(checks);
   if (entries.length === 0) throw new Error(`eval "${name}" has no checks`);
-  return Object.fromEntries(
-    entries.map(([key, check]) => {
-      if (typeof check === "function") return [key, check];
-      const valid =
-        typeof check === "string" ? check.trim() !== "" : typeof check?.question === "string";
-      if (!valid) throw new Error(`eval "${name}": check "${key}" is not a check`);
-      return [key, (run: Run<I, O, E>) => askJev(judge(), check, run as Run)];
-    }),
-  );
+  const code: Record<string, (run: Run<I, O, E>) => unknown> = {};
+  const jev: Record<string, Ask | string> = {};
+  for (const [key, check] of entries) {
+    if (typeof check === "function") {
+      code[key] = check;
+      continue;
+    }
+    const valid =
+      typeof check === "string" ? check.trim() !== "" : typeof check?.question === "string";
+    if (!valid) throw new Error(`eval "${name}": check "${key}" is not a check`);
+    jev[key] = check as Ask | string;
+  }
+  return { code, jev };
 }
 
 function score(
@@ -259,12 +262,13 @@ export async function evaluate<I, O, E>(
   const concurrency = positiveInt(name, "concurrency", options.concurrency, 4);
   const timeoutMs = options.timeout === undefined ? undefined : toMs(options.timeout, "timeout");
   let judge: Judge | undefined = options.judge;
-  const checks = toCheckFns(
-    name,
-    options.checks ?? { matches: matches() as Check<I, O, E> },
-    () => (judge ??= jev()),
-  );
-  const checkNames = Object.keys(checks);
+  const defined = options.checks ?? { matches: matches() as Check<I, O, E> };
+  const { code, jev: jevChecks } = toCheckParts(name, defined);
+  const checkNames = Object.keys(defined);
+  const jevGroup =
+    Object.keys(jevChecks).length === 0
+      ? undefined
+      : { judge: (judge ??= jev()), checks: jevChecks };
   const allowances = toAllowances(name, options.allow ?? {}, checkNames);
   const cases = named(
     name,
@@ -280,7 +284,8 @@ export async function evaluate<I, O, E>(
   const results = await runCases({
     cases,
     run,
-    checks,
+    checks: code,
+    ...(jevGroup === undefined ? {} : { jev: jevGroup }),
     repeats,
     concurrency,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),

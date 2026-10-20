@@ -8,6 +8,7 @@ import {
   jev,
   type Check,
   type Judge,
+  type Outcome,
   type Report,
 } from "../src/index.js";
 
@@ -24,12 +25,14 @@ function stubDeps(fetch: EvaluateDeps["fetch"]): EvaluateDeps {
   };
 }
 
-/** Answers every POST with `answer` and records the request bodies. */
+/** Answers every question on a POST with `answer` and records the request bodies. */
 function stubJev(answer: unknown) {
   const bodies: Record<string, unknown>[] = [];
   const fetch = (async (_url: string, init: RequestInit) => {
-    bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
-    return new Response(JSON.stringify({ model: "jev-test", answers: { q: answer } }), {
+    const body = JSON.parse(String(init.body)) as { questions: Record<string, unknown> };
+    bodies.push(body);
+    const answers = Object.fromEntries(Object.keys(body.questions).map((id) => [id, answer]));
+    return new Response(JSON.stringify({ model: "jev-test", answers }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -61,7 +64,7 @@ async function answered(answer: unknown, check: Check<string, string, string>) {
 describe("sentence checks", () => {
   const question = "Is this reply ready to send to the customer?";
 
-  test("one POST per check with the run as state", async () => {
+  test("one POST for the case's Jev checks with the run as state", async () => {
     const { outcome, bodies } = await answered({ type: "noul", noul: 0.9 }, question);
     expect(outcome).toEqual({ pass: true, value: 0.9, label: "yes" });
     expect(bodies).toHaveLength(1);
@@ -70,7 +73,7 @@ describe("sentence checks", () => {
       output: "reply to refund?",
       expect: "yes",
     });
-    expect(bodies[0]?.["questions"]).toEqual({ q: { type: "noul", instructions: question } });
+    expect(bodies[0]?.["questions"]).toEqual({ judged: { type: "noul", instructions: question } });
   });
 
   test("the unsure band fails with p", async () => {
@@ -97,6 +100,57 @@ describe("sentence checks", () => {
     );
     expect(outcome).toMatchObject({ pass: false, value: 0 });
     expect(outcome?.explanation).toContain("jev fallback");
+  });
+});
+
+describe("batching", () => {
+  test("a case's Jev checks answer in one call and map back by name", async () => {
+    const { bodies, judge } = stubJev({ type: "noul", noul: 0.9 });
+    const report = await evaluate("jev", {
+      run: (input: string) => `reply to ${input}`,
+      cases: [{ input: "refund?" }],
+      checks: { ready: "Ready to send?", polite: "Is the tone polite?" },
+      judge,
+    });
+    expect(bodies).toHaveLength(1);
+    expect(Object.keys(bodies[0]?.["questions"] as object)).toEqual(["ready", "polite"]);
+    expect(report.cases[0]?.checks["ready"]).toEqual({ pass: true, value: 0.9, label: "yes" });
+    expect(report.cases[0]?.checks["polite"]).toEqual({ pass: true, value: 0.9, label: "yes" });
+  });
+
+  test("a transport failure fails every Jev check in the batch", async () => {
+    const failing = (async () => {
+      throw new TypeError("boom");
+    }) as unknown as EvaluateDeps["fetch"];
+    let report: Report;
+    try {
+      await evaluate("jev", {
+        run: (input: string) => input,
+        cases: [{ input: "a" }],
+        checks: { ready: "Ready to send?", polite: "Is the tone polite?" },
+        judge: jev({ apiKey: "test-key", deps: stubDeps(failing) }),
+      });
+      throw new Error("expected failure");
+    } catch (cause) {
+      if (!(cause instanceof EvalFailure)) throw cause;
+      report = cause.report;
+    }
+    const checks = report.cases[0]?.checks as Record<string, Outcome>;
+    for (const name of ["ready", "polite"]) {
+      expect(checks[name]).toMatchObject({ pass: false, value: 0 });
+      expect(checks[name]?.explanation).toContain("jev fallback");
+    }
+  });
+
+  test("a case that skips one Jev check keeps it out of the call", async () => {
+    const { bodies, judge } = stubJev({ type: "noul", noul: 0.9 });
+    await evaluate("jev", {
+      run: (input: string) => input,
+      cases: [{ input: "a", skip: ["polite"] }],
+      checks: { ready: "Ready to send?", polite: "Is the tone polite?" },
+      judge,
+    });
+    expect(Object.keys(bodies[0]?.["questions"] as object)).toEqual(["ready"]);
   });
 });
 
