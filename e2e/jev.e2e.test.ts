@@ -154,6 +154,88 @@ describe("batching", () => {
   });
 });
 
+describe("thresholds", () => {
+  const question = "Is this reply ready to send to the customer?";
+  const noul = (p: number) => ({ type: "noul", noul: p });
+
+  function flatFetch(answer: unknown) {
+    return (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { questions: Record<string, unknown> };
+      const answers = Object.fromEntries(Object.keys(body.questions).map((id) => [id, answer]));
+      return new Response(JSON.stringify({ model: "jev-test", answers }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as EvaluateDeps["fetch"];
+  }
+
+  test("judge thresholds retune every check's bars", async () => {
+    const { judge } = stubJev(noul(0.75));
+    expect((await judged(question, judge)).outcome?.pass).toBe(true);
+    const strict = jev({
+      apiKey: "test-key",
+      thresholds: { yes: 0.8 },
+      deps: stubDeps(flatFetch(noul(0.75))),
+    });
+    expect((await judged(question, strict)).outcome).toMatchObject({
+      pass: false,
+      label: "unsure",
+      explanation: "unsure (p=0.75)",
+    });
+  });
+
+  test("per-check bars win over the judge's", async () => {
+    const { judge } = stubJev(noul(0.75));
+    expect((await judged({ question, yes: 0.6 }, judge)).outcome?.pass).toBe(true);
+    expect((await judged({ question, yes: 0.8 }, judge)).outcome).toMatchObject({
+      pass: false,
+      label: "unsure",
+    });
+  });
+
+  test("ask's own sure wins over the judge's", async () => {
+    const pick = {
+      type: "choice",
+      choice: "ready",
+      probabilities: { ready: 0.45, revise: 0.35, escalate: 0.2 },
+      confidence: 0.45,
+    };
+    const lenient = ask("Ready?", {
+      options: { ready: "send", revise: "work", escalate: "human" },
+      pass: "ready",
+      sure: 0.4,
+    });
+    const strict = ask("Ready?", {
+      options: { ready: "send", revise: "work", escalate: "human" },
+      pass: "ready",
+      sure: 0.5,
+    });
+    expect((await answered(pick, lenient)).outcome?.pass).toBe(true);
+    expect((await answered(pick, strict)).outcome).toMatchObject({ pass: false });
+  });
+
+  test("bad thresholds throw at definition", async () => {
+    expect(() => jev({ thresholds: { yes: 0.3, no: 0.5 } })).toThrow("must not exceed");
+    expect(() => jev({ thresholds: { sure: 1.5 } })).toThrow("[0, 1]");
+    expect(() => ask("Ready?", { options: { a: "a" }, pass: "a", sure: 0 })).toThrow("(0, 1]");
+    const { judge } = stubJev(noul(0.9));
+    await expect(judged({ question, yes: 0.2, no: 0.5 }, judge)).rejects.toThrow(
+      "no must not exceed yes",
+    );
+    // Even a hand-built ask (bypassing ask()) is validated at evaluate time.
+    await expect(
+      judged({ question: "Ready?", options: { a: "a" }, pass: ["a"], sure: 0 }, judge),
+    ).rejects.toThrow("sure must be in (0, 1]");
+    // A check-level `no` above the judge's `yes` clamps to the pass band instead
+    // of overlapping it: p=0.75 stays "yes" under defaults with no: 0.8.
+    const clamped = stubJev(noul(0.75)).judge;
+    expect((await judged({ question, no: 0.8 }, clamped)).outcome).toMatchObject({
+      pass: true,
+      label: "yes",
+    });
+  });
+});
+
 describe("ask", () => {
   const ready = ask("Ready to send?", {
     options: { ready: "send it", revise: "needs work", escalate: "needs a human" },

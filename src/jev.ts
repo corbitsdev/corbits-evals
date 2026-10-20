@@ -18,11 +18,40 @@ export type JevOptions = {
   apiKey?: string;
   /** Bounds one Jev call. `@corbits/system-one` defaults to 1500ms. */
   timeout?: Duration;
+  /** Pass bars for every Jev check through this judge. */
+  thresholds?: Thresholds;
   /** Replaces `fetch` and the scheduler, e.g. to stub Jev in tests. */
   deps?: EvaluateDeps;
 };
 
-export type Judge = { readonly config: EvaluateConfig; readonly deps?: EvaluateDeps };
+/** Yes/no passes at p >= `yes` and fails at p <= `no`; `ask` is unsure under `sure`. */
+export type Thresholds = { yes?: number; no?: number; sure?: number };
+
+export type Resolved = { yes: number; no: number; sure: number };
+
+/** The one documented set of numbers, tuned per workload with `calibrate`. */
+export const DEFAULTS: Resolved = { yes: 0.7, no: 0.3, sure: 0.6 };
+
+export type Judge = {
+  readonly config: EvaluateConfig;
+  readonly thresholds?: Resolved;
+  readonly deps?: EvaluateDeps;
+};
+
+function resolve(label: string, raw: Thresholds): Resolved {
+  const out: Resolved = {
+    yes: raw.yes ?? DEFAULTS.yes,
+    no: raw.no ?? DEFAULTS.no,
+    sure: raw.sure ?? DEFAULTS.sure,
+  };
+  for (const [key, value] of Object.entries(out)) {
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+      throw new Error(`jev: ${label}.${key} must be in [0, 1]`);
+    }
+  }
+  if (out.no > out.yes) throw new Error(`jev: ${label}.no must not exceed ${label}.yes`);
+  return out;
+}
 
 function toEndpoint(endpoint?: string, model?: string): EndpointConfig | undefined {
   const named = model === undefined ? {} : { model };
@@ -38,7 +67,13 @@ export function jev(options: JevOptions = {}): Judge {
   if (endpoint !== undefined) config.endpoint = endpoint;
   if (options.apiKey !== undefined) config.apiKey = options.apiKey;
   if (options.timeout !== undefined) config.timeoutMs = toMs(options.timeout, "jev timeout");
-  return options.deps === undefined ? { config } : { config, deps: options.deps };
+  const thresholds =
+    options.thresholds === undefined ? undefined : resolve("thresholds", options.thresholds);
+  return {
+    config,
+    ...(thresholds === undefined ? {} : { thresholds }),
+    ...(options.deps === undefined ? {} : { deps: options.deps }),
+  };
 }
 
 /** A Jev question with named answers. A plain string check is the yes/no case. */
@@ -47,21 +82,38 @@ export type Ask = {
   readonly options?: Readonly<Record<string, string>>;
   readonly levels?: readonly string[];
   readonly pass: readonly string[];
+  /** Overrides the judge's `sure` bar. */
+  readonly sure?: number;
+};
+
+/** A yes/no question with its own pass bars. A plain string uses the judge's. */
+export type Sentence = {
+  readonly question: string;
+  readonly yes?: number;
+  readonly no?: number;
 };
 
 /** Pick one option; pass when Jev picks one of `pass`. */
 export function ask(
   question: string,
-  spec: { options: Readonly<Record<string, string>>; pass: string | readonly string[] },
+  spec: {
+    options: Readonly<Record<string, string>>;
+    pass: string | readonly string[];
+    sure?: number;
+  },
 ): Ask;
 /** Grade on ordered levels, lowest first; pass at `pass` or above. */
-export function ask(question: string, spec: { levels: readonly string[]; pass: string }): Ask;
+export function ask(
+  question: string,
+  spec: { levels: readonly string[]; pass: string; sure?: number },
+): Ask;
 export function ask(
   question: string,
   spec: {
     options?: Readonly<Record<string, string>>;
     levels?: readonly string[];
     pass: string | readonly string[];
+    sure?: number;
   },
 ): Ask {
   if (question.trim() === "") throw new Error("ask needs a question");
@@ -76,20 +128,18 @@ export function ask(
   for (const name of pass) {
     if (!names.includes(name)) throw new Error(`ask: pass "${name}" is not an answer`);
   }
+  if (spec.sure !== undefined && (!Number.isFinite(spec.sure) || spec.sure <= 0 || spec.sure > 1)) {
+    throw new Error("ask: sure must be in (0, 1]");
+  }
+  const sure = spec.sure === undefined ? {} : { sure: spec.sure };
   return spec.options === undefined
-    ? { question, levels: names, pass }
-    : { question, options: spec.options, pass };
+    ? { question, levels: names, pass, ...sure }
+    : { question, options: spec.options, pass, ...sure };
 }
 
-/** Yes/no passes at p >= YES, fails at p <= NO; between is unsure and fails. */
-const YES = 0.7;
-const NO = 0.3;
-/** A choice or level picked with less probability than this is unsure and fails. */
-const SURE = 0.6;
-
-function toQuestion(id: string, check: Ask | string): Question {
+function toQuestion(id: string, check: Ask | Sentence | string): Question {
   if (typeof check === "string") return { id, type: "boolean", instructions: check };
-  if (check.options !== undefined) {
+  if ("options" in check && check.options !== undefined) {
     return {
       id,
       type: "choice",
@@ -97,12 +147,15 @@ function toQuestion(id: string, check: Ask | string): Question {
       criteria: { ...check.options },
     };
   }
-  return {
-    id,
-    type: "score",
-    instructions: check.question,
-    criteria: [...(check.levels ?? [])],
-  };
+  if ("levels" in check && check.levels !== undefined) {
+    return {
+      id,
+      type: "score",
+      instructions: check.question,
+      criteria: [...check.levels],
+    };
+  }
+  return { id, type: "boolean", instructions: check.question };
 }
 
 function failed(explanation: string): Outcome {
@@ -113,11 +166,48 @@ function p(n: number): string {
   return n.toFixed(2);
 }
 
-function toOutcome(check: Ask | string, decision: Decision): Outcome {
+/** Per-check overrides win over the judge's, which win over `DEFAULTS`. */
+function thresholdsFor(check: Ask | Sentence | string, judge: Judge): Resolved {
+  const base = judge.thresholds ?? DEFAULTS;
+  if (typeof check === "string") return base;
+  const any = check as { sure?: number; yes?: number; no?: number };
+  const yes = any.yes ?? base.yes;
+  return {
+    yes,
+    // A check-level `no` above the merged `yes` would overlap the pass band.
+    // Clamping it keeps the band shape; the pass branch already wins the
+    // overlap, so no verdict changes.
+    no: Math.min(any.no ?? base.no, yes),
+    sure: any.sure ?? base.sure,
+  };
+}
+
+/** Throws when a per-check override is malformed, so bad bars fail at definition. */
+export function checkThresholds(check: Ask | Sentence | string): void {
+  if (typeof check === "string") return;
+  const any = check as { sure?: number; yes?: number; no?: number };
+  for (const key of ["yes", "no"] as const) {
+    const value = any[key];
+    if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > 1)) {
+      throw new Error(`jev: ${key} must be in [0, 1]`);
+    }
+  }
+  const sure = any.sure;
+  if (sure !== undefined && (!Number.isFinite(sure) || sure <= 0 || sure > 1)) {
+    throw new Error("jev: sure must be in (0, 1]");
+  }
+  if (any.yes !== undefined && any.no !== undefined && any.no > any.yes) {
+    throw new Error("jev: no must not exceed yes");
+  }
+}
+
+function toOutcome(check: Ask | Sentence | string, decision: Decision, judge: Judge): Outcome {
+  const t = thresholdsFor(check, judge);
   if (decision.type === "noul") {
     const yes = decision.noul;
-    if (yes >= YES) return { pass: true, value: yes, label: "yes" };
-    if (yes <= NO) return { pass: false, value: yes, label: "no", explanation: `no (p=${p(yes)})` };
+    if (yes >= t.yes) return { pass: true, value: yes, label: "yes" };
+    if (yes <= t.no)
+      return { pass: false, value: yes, label: "no", explanation: `no (p=${p(yes)})` };
     return { pass: false, value: yes, label: "unsure", explanation: `unsure (p=${p(yes)})` };
   }
   const ask = check as Ask;
@@ -125,9 +215,9 @@ function toOutcome(check: Ask | string, decision: Decision): Outcome {
   if (decision.type === "choice") {
     const value = Math.min(
       1,
-      ask.pass.reduce((t, name) => t + (decision.probabilities[name] ?? 0), 0),
+      ask.pass.reduce((sum, name) => sum + (decision.probabilities[name] ?? 0), 0),
     );
-    if (top < SURE) {
+    if (top < t.sure) {
       return {
         ...failed(`unsure (p=${p(top)} for "${decision.choice}")`),
         value,
@@ -143,7 +233,8 @@ function toOutcome(check: Ask | string, decision: Decision): Outcome {
   const index = Math.round(decision.score);
   const level = levels[index] ?? String(decision.score);
   const value = decision.score / (levels.length - 1);
-  if (top < SURE) return { ...failed(`unsure (p=${p(top)} for "${level}")`), value, label: level };
+  if (top < t.sure)
+    return { ...failed(`unsure (p=${p(top)} for "${level}")`), value, label: level };
   const pass = index >= levels.indexOf(ask.pass[0] ?? "");
   const outcome: Outcome = { pass, value, label: level };
   if (!pass) outcome.explanation = `graded "${level}"`;
@@ -158,14 +249,14 @@ function toOutcome(check: Ask | string, decision: Decision): Outcome {
  */
 export async function askJevBatch(
   judge: Judge,
-  checks: Record<string, Ask | string>,
+  checks: Record<string, Ask | Sentence | string>,
   run: Run,
 ): Promise<Record<string, Outcome>> {
   const names = Object.keys(checks);
   const state: Record<string, unknown> = { input: run.input, output: run.output };
   if (run.expect !== undefined) state["expect"] = run.expect;
   if (run.steps.length > 0) state["steps"] = run.steps;
-  const questions = names.map((id) => toQuestion(id, checks[id] as Ask | string));
+  const questions = names.map((id) => toQuestion(id, checks[id] as Ask | Sentence | string));
   let out;
   try {
     out = await evaluate(
@@ -185,7 +276,7 @@ export async function askJevBatch(
       const outcome =
         decision === undefined
           ? failed("jev returned no decision")
-          : toOutcome(checks[name] as Ask | string, decision);
+          : toOutcome(checks[name] as Ask | Sentence | string, decision, judge);
       return [name, outcome];
     }),
   );
