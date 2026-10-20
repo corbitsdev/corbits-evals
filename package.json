@@ -1,6 +1,6 @@
 {
   "name": "@corbits/evals",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Evals for agents and workflows in one evaluate call: code, Jev and helper checks over JSONL or inline cases, gated per check on allowed misses and drops.",
   "keywords": [
     "agents",
