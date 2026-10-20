@@ -8,9 +8,9 @@
         "@corbits/system-one": "^0.3.0",
       },
       "devDependencies": {
-        "@intx/agent": "^0.4.0",
-        "@intx/types": "^0.4.0",
-        "@intx/workflow": "^0.4.0",
+        "@intx/agent": "^0.5.0",
+        "@intx/types": "^0.5.0",
+        "@intx/workflow": "^0.5.0",
         "@types/bun": "^1.3.14",
         "arktype": "^2.2.3",
         "oxfmt": "^0.70.0",
@@ -18,7 +18,7 @@
         "typescript": "^6.0.3",
       },
       "peerDependencies": {
-        "@intx/workflow": "^0.4.0",
+        "@intx/workflow": "^0.5.0",
       },
       "optionalPeers": [
         "@intx/workflow",
@@ -32,19 +32,19 @@
 
     "@corbits/system-one": ["@corbits/system-one@0.3.0", "", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": "^0.4.0", "@intx/types": "^0.4.0" } }, "sha512-rH1MSTyTph1O3wRjVuh2gbunfPLXK0HFDjOym9CkXtcDpRa6J+sWiDsnHdIla3KnVxPWQ2dTbYYck6KlTghtIw=="],
 
-    "@intx/agent": ["@intx/agent@0.4.0", "", { "dependencies": { "@intx/inference": "0.4.0", "@intx/log": "0.4.0", "@intx/mime": "0.4.0", "@intx/types": "0.4.0", "arktype": "^2.1.29" } }, "sha512-qBlqDYnsaRMsug/lEKwUvPgQfjiwppTpfw5JaUh6pwKi0dGvckv3ugjJvLdHM052nTFMgLgOwo1LvbRjPZ5Uwg=="],
+    "@intx/agent": ["@intx/agent@0.5.0", "", { "dependencies": { "@intx/inference": "0.5.0", "@intx/log": "0.5.0", "@intx/mime": "0.5.0", "@intx/types": "0.5.0", "arktype": "^2.1.29" } }, "sha512-EWkRfduYJii67goq0cdO6qgRtV0aLe2jGk2aZJhurOivluy3tx0SlhiO2YaQmA4du+qBNzlMV9MMfKkmQ/zs+Q=="],
 
-    "@intx/crypto": ["@intx/crypto@0.4.0", "", { "dependencies": { "@intx/types": "0.4.0" } }, "sha512-4/qWypC90GevbV9u1i/93tn46jsXhj8wE1Pn+awg8/ECpwhHnhPLT5Uy423Arr9eGmRmF6HiMyXcEgH1Z9/Rkw=="],
+    "@intx/crypto": ["@intx/crypto@0.5.0", "", { "dependencies": { "@intx/types": "0.5.0" } }, "sha512-EX5dAQuazYbsqc51d9e9BkIxUEhGf4+9U3S91XHOg+OrHcjYRxZoFzgcrAHIJVK8Mqh0WzKhGTsY1g2r3iW9nw=="],
 
-    "@intx/inference": ["@intx/inference@0.4.0", "", { "dependencies": { "@intx/log": "0.4.0", "@intx/types": "0.4.0", "arktype": "^2.1.29" } }, "sha512-cuaqCqotmjg0OzGUm8QmFJr1xX5wPVS0LeuhrxHsj0X3ImoCzVB4e/ttTc+DaP3K1tTMQ/8Q8HHCAPX36mOecQ=="],
+    "@intx/inference": ["@intx/inference@0.5.0", "", { "dependencies": { "@intx/log": "0.5.0", "@intx/types": "0.5.0", "arktype": "^2.1.29" } }, "sha512-Dr4HwV1RH+tlPjH5DqL5buymt3NdbX/v7gG1zEwSqUvQ044V8NBPJA7u7+o+w3zMrRwyUiW+n4d+lUooCVv3JA=="],
 
-    "@intx/log": ["@intx/log@0.4.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-f1IPZ/9YpEqlA0I2UZPOlRJOTDoOFEZRwZoUVuw8DpgR1WatOMm4hA0E8o6Mtz+pA0ux7gVdls4y/JZcgypsfQ=="],
+    "@intx/log": ["@intx/log@0.5.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-SxS1WM/wsxzWgAUBDE8RcBpoZSxNnVoRm21YnHr+uZeGzS1bkqc7zW41PzVAW9p6+EsoSZFN6dr5R3jcs4k9RA=="],
 
-    "@intx/mime": ["@intx/mime@0.4.0", "", { "dependencies": { "@intx/crypto": "0.4.0", "@intx/types": "0.4.0", "arktype": "^2.1.29" } }, "sha512-sWrohF2uwVL5AZHbxIEUNiVUBhULff4XB7g6keCmyQWr296GKSvG/HmbihSXxiIvmmDzh9cl+6ZAJz/taxFNog=="],
+    "@intx/mime": ["@intx/mime@0.5.0", "", { "dependencies": { "@intx/crypto": "0.5.0", "@intx/types": "0.5.0", "arktype": "^2.1.29" } }, "sha512-8uVYEltQJD0/8FFQ6ilzruJ0ZOPLHWCKkyKz1srat3DrbiCsUE1V1YNYHSOCjhL/Htf6FmHuqm94ZmfwPZT8Yg=="],
 
-    "@intx/types": ["@intx/types@0.4.0", "", { "dependencies": { "arktype": "^2.1.29", "semver": "^7.7.2" } }, "sha512-nJ2fcmskMOZNMRfbHs5ueKpCANHNttoL+sZgIoFaVUF/QLpFWfVp0YV72CQAaa9bVv9j5kRSwtSOCCGSlwQ6Dw=="],
+    "@intx/types": ["@intx/types@0.5.0", "", { "dependencies": { "arktype": "^2.1.29", "semver": "^7.7.2" } }, "sha512-FZu96zH9XqEgpOahXbXUPkg8qAV0TG4JggrE5A4ZN0jdiEB6n06YM6CPv+REuoKoYF9UIHviwltV9ZbT2D1rdQ=="],
 
-    "@intx/workflow": ["@intx/workflow@0.4.0", "", { "dependencies": { "@intx/agent": "0.4.0", "@intx/inference": "0.4.0", "@intx/types": "0.4.0", "arktype": "^2.1.29" } }, "sha512-F5Is/lyKb4/WguAVYMDXwtI4ddUvqXbg34rcM6hPUOqupJHpbbD9+ZK/6TDfvbCiEgginbTVwMmNj6Fyg8vU+Q=="],
+    "@intx/workflow": ["@intx/workflow@0.5.0", "", { "dependencies": { "@intx/agent": "0.5.0", "@intx/inference": "0.5.0", "@intx/types": "0.5.0", "arktype": "^2.1.29" } }, "sha512-yEIrIWxZ3okiGCXt99MkHdarhVff8fhA90ynrRcaJoLXCYU5zFsmhooLcEzmKUHRWosLalnuhJvpnJIdWed/GA=="],
 
     "@logtape/hono": ["@logtape/hono@2.3.11", "", { "peerDependencies": { "@logtape/logtape": "^2.3.11", "hono": "^4.0.0" } }, "sha512-qCkmYoifdGqWnK+8Foqk32JOQEdVso3gX4NUGw+gg8bZwiF6ZApeSMdY/r733vrhgLgFuETxOdGu4Jscsj6vhw=="],
 
@@ -149,5 +149,11 @@
     "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
+
+    "@corbits/system-one/@intx/inference": ["@intx/inference@0.4.0", "", { "dependencies": { "@intx/log": "0.4.0", "@intx/types": "0.4.0", "arktype": "^2.1.29" } }, "sha512-cuaqCqotmjg0OzGUm8QmFJr1xX5wPVS0LeuhrxHsj0X3ImoCzVB4e/ttTc+DaP3K1tTMQ/8Q8HHCAPX36mOecQ=="],
+
+    "@corbits/system-one/@intx/inference/@intx/log": ["@intx/log@0.4.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-f1IPZ/9YpEqlA0I2UZPOlRJOTDoOFEZRwZoUVuw8DpgR1WatOMm4hA0E8o6Mtz+pA0ux7gVdls4y/JZcgypsfQ=="],
+
+    "@corbits/system-one/@intx/inference/@intx/types": ["@intx/types@0.4.0", "", { "dependencies": { "arktype": "^2.1.29", "semver": "^7.7.2" } }, "sha512-nJ2fcmskMOZNMRfbHs5ueKpCANHNttoL+sZgIoFaVUF/QLpFWfVp0YV72CQAaa9bVv9j5kRSwtSOCCGSlwQ6Dw=="],
   }
 }
