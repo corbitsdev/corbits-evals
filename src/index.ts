@@ -37,6 +37,7 @@ export {
   jev,
   DEFAULTS,
   type Ask,
+  type Escalation,
   type JevOptions,
   type Judge,
   type Sentence,

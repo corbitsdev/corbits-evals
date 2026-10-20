@@ -10,6 +10,7 @@ import {
   evaluate,
   jev,
   type Check,
+  type Escalation,
   type Judge,
   type Outcome,
   type Report,
@@ -356,6 +357,149 @@ describe("ask", () => {
     expect(() => ask("Ready?", { options: { ready: "yes" }, pass: "redy" })).toThrow('"redy"');
     expect(() => ask("Graded?", { levels: ["only"], pass: "only" })).toThrow("2 to 10");
     expect(() => ask(" ", { options: { a: "a" }, pass: "a" })).toThrow("needs a question");
+  });
+});
+
+describe("escalation", () => {
+  const question = "Is this reply ready to send to the customer?";
+  const unsure = { type: "noul", noul: 0.5 } as const;
+
+  function escalating(primary: unknown, send: Escalation["send"]) {
+    const { judge } = stubJev(primary);
+    return { ...judge, escalate: { send } };
+  }
+
+  test("an unsure primary decision escalates and the reply follows the pass rules", async () => {
+    const prompts: string[] = [];
+    const judge = escalating(unsure, async (prompt) => {
+      prompts.push(prompt);
+      return { type: "reply", reply: "yes" };
+    });
+    const { outcome } = await judged(question, judge);
+    expect(outcome).toEqual({
+      pass: true,
+      value: 1,
+      label: "yes",
+      explanation: 'escalated to "yes"',
+    });
+    expect(prompts[0]).toContain(question);
+    expect(prompts[0]).toContain('"yes", "no"');
+    expect(prompts[0]).toContain("refund?");
+  });
+
+  test("an escalated no fails the case", async () => {
+    const judge = escalating(unsure, async () => ({ type: "reply", reply: "no" }));
+    const { outcome } = await judged(question, judge);
+    expect(outcome).toEqual({
+      pass: false,
+      value: 0,
+      label: "no",
+      explanation: 'escalated to "no"',
+    });
+  });
+
+  test("a confident primary decision never escalates", async () => {
+    let calls = 0;
+    const judge = escalating({ type: "noul", noul: 0.9 }, async () => {
+      calls += 1;
+      return { type: "reply", reply: "yes" };
+    });
+    const { outcome } = await judged(question, judge);
+    expect(outcome?.pass).toBe(true);
+    expect(calls).toBe(0);
+  });
+
+  test("escalation trouble fails closed", async () => {
+    const throws = escalating(unsure, async () => {
+      throw new Error("boom");
+    });
+    expect((await judged(question, throws)).outcome).toMatchObject({
+      pass: false,
+      explanation: "unsure, and escalation threw: boom",
+    });
+    const suspends = escalating(unsure, async () => ({ type: "suspended" }));
+    expect((await judged(question, suspends)).outcome).toMatchObject({
+      pass: false,
+      explanation: "unsure, and escalation did not reply",
+    });
+    const offSpace = escalating(unsure, async () => ({
+      type: "reply",
+      reply: "maybe, could go either way",
+    }));
+    expect((await judged(question, offSpace)).outcome).toMatchObject({
+      pass: false,
+      explanation:
+        'unsure, and escalation replied outside the answer space ("maybe, could go either way")',
+    });
+  });
+
+  test("an ask check escalates in its own answer space", async () => {
+    const check = ask("Where does the reply fall short?", {
+      options: { ready: "complete", revise: "needs work", escalate: "beyond repair" },
+      pass: "ready",
+    });
+    const judge = escalating(
+      {
+        type: "choice",
+        choice: "revise",
+        probabilities: { ready: 0.3, revise: 0.35, escalate: 0.35 },
+        confidence: 0.35,
+      },
+      async () => ({ type: "reply", reply: "I would say: revise" }),
+    );
+    const { outcome } = await judged(check, judge);
+    expect(outcome).toEqual({
+      pass: false,
+      value: 0,
+      label: "revise",
+      explanation: 'escalated to "revise"',
+    });
+  });
+
+  test("credit rules survive escalation", async () => {
+    const check = ask("How complete is the reply?", {
+      options: { full: 1, partial: 0.75, hedged: 0.5 },
+      passAt: 0.5,
+    });
+    const judge = escalating(
+      {
+        type: "choice",
+        choice: "hedged",
+        probabilities: { full: 0.2, partial: 0.3, hedged: 0.5 },
+        confidence: 0.5,
+      },
+      async () => ({ type: "reply", reply: "hedged" }),
+    );
+    const { outcome } = await judged(check, judge);
+    expect(outcome).toEqual({
+      pass: true,
+      value: 0.5,
+      label: "hedged",
+      explanation: 'escalated to "hedged" (credit 0.50)',
+    });
+  });
+
+  test("answers with non-word edges still match", async () => {
+    const check = ask("Is the task complete?", {
+      options: { "@done": "finished", open: "not finished" },
+      pass: "@done",
+    });
+    const judge = escalating(
+      {
+        type: "choice",
+        choice: "open",
+        probabilities: { "@done": 0.45, open: 0.55 },
+        confidence: 0.55,
+      },
+      async () => ({ type: "reply", reply: "I think: @done" }),
+    );
+    const { outcome } = await judged(check, judge);
+    expect(outcome).toEqual({
+      pass: true,
+      value: 1,
+      label: "@done",
+      explanation: 'escalated to "@done"',
+    });
   });
 });
 

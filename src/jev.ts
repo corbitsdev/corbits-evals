@@ -20,6 +20,8 @@ export type JevOptions = {
   timeout?: Duration;
   /** Pass bars for every Jev check through this judge. */
   thresholds?: Thresholds;
+  /** Consulted when a decision lands unsure. `sure` doubles as the escalation gate. */
+  escalate?: Escalation;
   /** Replaces `fetch` and the scheduler, e.g. to stub Jev in tests. */
   deps?: EvaluateDeps;
 };
@@ -35,7 +37,20 @@ export const DEFAULTS: Resolved = { yes: 0.7, no: 0.3, sure: 0.6 };
 export type Judge = {
   readonly config: EvaluateConfig;
   readonly thresholds?: Resolved;
+  readonly escalate?: Escalation;
   readonly deps?: EvaluateDeps;
+};
+
+/**
+ * An agent consulted when the primary Jev decision lands unsure — e.g. an
+ * `@intx/agent` agent from a `@corbits/*` adapter. It gets the same question
+ * with the exact answer space; its reply must stay inside that space.
+ */
+export type Escalation = {
+  readonly send: (
+    content: string,
+    opts?: { signal?: AbortSignal },
+  ) => Promise<{ type: "reply"; reply: string } | { type: "suspended" }>;
 };
 
 function resolve(label: string, raw: Thresholds): Resolved {
@@ -72,6 +87,7 @@ export function jev(options: JevOptions = {}): Judge {
   return {
     config,
     ...(thresholds === undefined ? {} : { thresholds }),
+    ...(options.escalate === undefined ? {} : { escalate: options.escalate }),
     ...(options.deps === undefined ? {} : { deps: options.deps }),
   };
 }
@@ -343,16 +359,21 @@ export async function askJevBatch(
     return failedAll(names, `jev fallback (${out.reason}): ${out.detail ?? "no detail"}`);
   }
   const decisions = new Map(out.decisions.map((decision) => [decision.id, decision]));
-  return Object.fromEntries(
-    names.map((name) => {
+  const entries = await Promise.all(
+    names.map(async (name) => {
       const decision = decisions.get(name);
+      const check = checks[name] as Ask | Sentence | string;
       const outcome =
         decision === undefined
           ? failed("jev returned no decision")
-          : toOutcome(checks[name] as Ask | Sentence | string, decision, judge);
-      return [name, outcome];
+          : toOutcome(check, decision, judge);
+      if (judge.escalate !== undefined && isUnsure(outcome)) {
+        return [name, await escalateUnsure(judge, check, run)] as const;
+      }
+      return [name, outcome] as const;
     }),
   );
+  return Object.fromEntries(entries);
 }
 
 /**
@@ -380,4 +401,104 @@ export async function decideBatch(
 
 function failedAll(names: readonly string[], explanation: string): Record<string, Outcome> {
   return Object.fromEntries(names.map((name) => [name, failed(explanation)]));
+}
+
+/** Unsure outcomes are exactly the failed ones whose explanation starts "unsure (". */
+function isUnsure(outcome: Outcome): boolean {
+  return !outcome.pass && (outcome.explanation?.startsWith("unsure (") ?? false);
+}
+
+function allowedAnswers(check: Ask | Sentence | string): string[] {
+  if (typeof check === "string" || "yes" in check) return ["yes", "no"];
+  const a = check as Ask;
+  if (a.levels !== undefined) return [...a.levels];
+  if (a.options !== undefined) return Object.keys(a.options);
+  return [...(a.pass ?? [])];
+}
+
+function escalationPrompt(check: Ask | Sentence | string, run: Run, answers: string[]): string {
+  const question = typeof check === "string" ? check : check.question;
+  return [
+    "A primary judge could not decide the following case confidently. Decide it.",
+    `Question: ${question}`,
+    `Reply with exactly one of: ${answers.map((answer) => `"${answer}"`).join(", ")}.`,
+    `Case: ${JSON.stringify(toState(run))}`,
+  ].join("\n\n");
+}
+
+/**
+ * Longest match wins, so overlapping names resolve to the more specific one.
+ * Boundary assertions apply only at word-character edges: `\b` sits between
+ * two non-word characters where no boundary exists, so answers like "@done"
+ * or "50%" would otherwise never match an exact reply.
+ */
+function pickAnswer(reply: string, answers: string[]): string | undefined {
+  const escaped = (answer: string) => answer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const edge = (answer: string, at: "head" | "tail") => {
+    const c = at === "head" ? answer.charAt(0) : answer.charAt(answer.length - 1);
+    return /[A-Za-z0-9_]/.test(c) ? "\\b" : "";
+  };
+  for (const answer of [...answers].sort((a, b) => b.length - a.length)) {
+    const pattern = `${edge(answer, "head")}${escaped(answer)}${edge(answer, "tail")}`;
+    if (new RegExp(pattern, "i").test(reply)) return answer;
+  }
+  return undefined;
+}
+
+/** The escalated answer as a Decision, so `toOutcome`'s own rules apply. */
+function escalatedDecision(check: Ask | Sentence | string, picked: string): Decision {
+  if (typeof check === "string" || "yes" in check)
+    return { id: "escalated", type: "noul", noul: picked.toLowerCase() === "yes" ? 1 : 0 };
+  const a = check as Ask;
+  if (a.levels !== undefined)
+    return {
+      id: "escalated",
+      type: "score",
+      score: a.levels.indexOf(picked),
+      legend: Object.fromEntries(a.levels.map((level) => [level, level])),
+      probabilities: { [picked]: 1 },
+      confidence: 1,
+    };
+  return {
+    id: "escalated",
+    type: "choice",
+    choice: picked,
+    probabilities: { [picked]: 1 },
+    confidence: 1,
+  };
+}
+
+/**
+ * Consult `judge.escalate` for an unsure decision. The reply goes through the
+ * same pass rules as a primary decision, minus the confidence gate; a thrown,
+ * suspended, or off-space reply fails the case closed.
+ */
+async function escalateUnsure(
+  judge: Judge,
+  check: Ask | Sentence | string,
+  run: Run,
+): Promise<Outcome> {
+  const escalation = judge.escalate as Escalation;
+  let reply: string;
+  try {
+    const result = await escalation.send(escalationPrompt(check, run, allowedAnswers(check)));
+    if (result.type !== "reply") return failed(`unsure, and escalation did not reply`);
+    reply = result.reply;
+  } catch (cause) {
+    return failed(
+      `unsure, and escalation threw: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+  const picked = pickAnswer(reply, allowedAnswers(check));
+  if (picked === undefined)
+    return failed(
+      `unsure, and escalation replied outside the answer space ("${reply.trim().slice(0, 40)}")`,
+    );
+  const outcome = toOutcome(check, escalatedDecision(check, picked), judge);
+  delete outcome.probabilities;
+  delete outcome.confidence;
+  const raw = (check as Ask).options?.[picked];
+  const credit = typeof raw === "number" ? raw : undefined;
+  outcome.explanation = `escalated to "${picked}"${credit === undefined ? "" : ` (credit ${p(credit)})`}`;
+  return outcome;
 }
