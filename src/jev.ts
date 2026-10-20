@@ -252,7 +252,11 @@ function r3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
-function toOutcome(check: Ask | Sentence | string, decision: Decision, judge: Judge): Outcome {
+export function toOutcome(
+  check: Ask | Sentence | string,
+  decision: Decision,
+  judge: Judge,
+): Outcome {
   const t = thresholdsFor(check, judge);
   const d = dist(decision);
   if (decision.type === "noul") {
@@ -306,6 +310,13 @@ function toOutcome(check: Ask | Sentence | string, decision: Decision, judge: Ju
   return outcome;
 }
 
+function toState(run: Run): Record<string, unknown> {
+  const state: Record<string, unknown> = { input: run.input, output: run.output };
+  if (run.expect !== undefined) state["expect"] = run.expect;
+  if (run.steps.length > 0) state["steps"] = run.steps;
+  return state;
+}
+
 /**
  * Answer every check in one Jev call, keyed by check name. Fail-closed:
  * transport fallbacks, thrown errors and missing decisions all fail — a
@@ -318,14 +329,11 @@ export async function askJevBatch(
   run: Run,
 ): Promise<Record<string, Outcome>> {
   const names = Object.keys(checks);
-  const state: Record<string, unknown> = { input: run.input, output: run.output };
-  if (run.expect !== undefined) state["expect"] = run.expect;
-  if (run.steps.length > 0) state["steps"] = run.steps;
   const questions = names.map((id) => toQuestion(id, checks[id] as Ask | Sentence | string));
   let out;
   try {
     out = await evaluate(
-      { state, questions, config: judge.config },
+      { state: toState(run), questions, config: judge.config },
       judge.deps === undefined ? undefined : { deps: judge.deps },
     );
   } catch (cause) {
@@ -345,6 +353,29 @@ export async function askJevBatch(
       return [name, outcome];
     }),
   );
+}
+
+/**
+ * One Jev call returning raw decisions keyed by check name. Throws on a
+ * transport failure — for callers like `calibrate` that want loud errors
+ * instead of fail-closed outcomes.
+ */
+export async function decideBatch(
+  judge: Judge,
+  checks: Record<string, Ask | Sentence | string>,
+  run: Run,
+): Promise<Record<string, Decision>> {
+  const names = Object.keys(checks);
+  const out = await evaluate(
+    {
+      state: toState(run),
+      questions: names.map((id) => toQuestion(id, checks[id] as Ask | Sentence | string)),
+      config: judge.config,
+    },
+    judge.deps === undefined ? undefined : { deps: judge.deps },
+  );
+  if (out.fallback) throw new Error(`jev fallback (${out.reason}): ${out.detail ?? "no detail"}`);
+  return Object.fromEntries(out.decisions.map((decision) => [decision.id, decision]));
 }
 
 function failedAll(names: readonly string[], explanation: string): Record<string, Outcome> {

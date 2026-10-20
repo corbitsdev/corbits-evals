@@ -142,6 +142,26 @@ eval, with no file: `evaluate(name, { ...options, compare: before })`.
 Flips print as `fixed` / `broke`, new and gone cases as `added` /
 `removed`. `quiet: true` skips the summary.
 
+## Calibrating
+
+Thresholds are per-workload starting points, not constants. `calibrate`
+runs a labeled sample through Jev once and prints, per check, how many
+verdicts agree, land unsure, or confidently disagree at each threshold:
+
+```ts
+const table = await calibrate("refund-agent", {
+  run: refundAgent,
+  cases: labeledCases, // { input, expect?, labels: { readyToSend: true } }
+  checks: { readyToSend: "Is this reply ready to send to the customer?" },
+  judge,
+});
+console.log(table.markdown());
+```
+
+Yes/no checks sweep `yes` with `no` mirrored; `ask` sweeps `sure`. Paste
+the recommended override into the check or judge. Zero confident
+disagreements is the goal; if none exists, the fewest wins.
+
 ## Peers
 
 - `@corbits/evals`: `@intx/inference` and `@intx/types`, peers of
