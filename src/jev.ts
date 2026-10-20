@@ -201,14 +201,28 @@ export function checkThresholds(check: Ask | Sentence | string): void {
   }
 }
 
+/** The decision's full distribution; the answer never carries it alone. */
+function dist(decision: Decision): { probabilities: Record<string, number>; confidence?: number } {
+  if (decision.type === "noul") {
+    const yes = r3(decision.noul);
+    return { probabilities: { yes, no: r3(1 - decision.noul) } };
+  }
+  return { probabilities: { ...decision.probabilities }, confidence: decision.confidence };
+}
+
+function r3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
 function toOutcome(check: Ask | Sentence | string, decision: Decision, judge: Judge): Outcome {
   const t = thresholdsFor(check, judge);
+  const d = dist(decision);
   if (decision.type === "noul") {
     const yes = decision.noul;
-    if (yes >= t.yes) return { pass: true, value: yes, label: "yes" };
+    if (yes >= t.yes) return { pass: true, value: yes, label: "yes", ...d };
     if (yes <= t.no)
-      return { pass: false, value: yes, label: "no", explanation: `no (p=${p(yes)})` };
-    return { pass: false, value: yes, label: "unsure", explanation: `unsure (p=${p(yes)})` };
+      return { pass: false, value: yes, label: "no", explanation: `no (p=${p(yes)})`, ...d };
+    return { pass: false, value: yes, label: "unsure", explanation: `unsure (p=${p(yes)})`, ...d };
   }
   const ask = check as Ask;
   const top = Math.max(...Object.values(decision.probabilities));
@@ -222,10 +236,11 @@ function toOutcome(check: Ask | Sentence | string, decision: Decision, judge: Ju
         ...failed(`unsure (p=${p(top)} for "${decision.choice}")`),
         value,
         label: decision.choice,
+        ...d,
       };
     }
     const pass = ask.pass.includes(decision.choice);
-    const outcome: Outcome = { pass, value, label: decision.choice };
+    const outcome: Outcome = { pass, value, label: decision.choice, ...d };
     if (!pass) outcome.explanation = `picked "${decision.choice}"`;
     return outcome;
   }
@@ -234,9 +249,9 @@ function toOutcome(check: Ask | Sentence | string, decision: Decision, judge: Ju
   const level = levels[index] ?? String(decision.score);
   const value = decision.score / (levels.length - 1);
   if (top < t.sure)
-    return { ...failed(`unsure (p=${p(top)} for "${level}")`), value, label: level };
+    return { ...failed(`unsure (p=${p(top)} for "${level}")`), value, label: level, ...d };
   const pass = index >= levels.indexOf(ask.pass[0] ?? "");
-  const outcome: Outcome = { pass, value, label: level };
+  const outcome: Outcome = { pass, value, label: level, ...d };
   if (!pass) outcome.explanation = `graded "${level}"`;
   return outcome;
 }

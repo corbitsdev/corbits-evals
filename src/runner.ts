@@ -112,6 +112,8 @@ function compileAttempts(attempts: readonly Outcome[]): Outcome {
     }`,
   };
   if (decider.label !== undefined) compiled.label = decider.label;
+  if (decider.probabilities !== undefined) compiled.probabilities = decider.probabilities;
+  if (decider.confidence !== undefined) compiled.confidence = decider.confidence;
   return compiled;
 }
 

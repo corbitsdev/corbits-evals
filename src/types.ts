@@ -33,6 +33,10 @@ export type Outcome = {
   explanation?: string;
   /** What a Jev check picked. */
   label?: string;
+  /** The full distribution behind a Jev decision. */
+  probabilities?: Record<string, number>;
+  /** Jev's confidence in the picked answer. */
+  confidence?: number;
 };
 
 /** A number must be 0..1 and passes only at 1. */
