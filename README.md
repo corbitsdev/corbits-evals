@@ -34,7 +34,7 @@ console.log(report.markdown());
 
 ## Checks
 
-`checks` maps a name to a check. Without `checks`, one `matches` check
+`scorers` maps a name to a check. Without `scorers`, one `matches` check
 compares output with `expectedOutput`. Every check gets the run
 `r = { input, output, expectedOutput, steps, ms }`; `output` is whatever the run
 returned.
@@ -47,19 +47,19 @@ returned.
   `unsure (p=…)` in between. `{ question, yes, no }` sets its own bars.
 - **Helpers**:
 
-| helper                        | passes when                                                                                                                                                                         |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `matches(field?)`             | output deep-equals expectedOutput, or the same field (key or accessor) of each                                                                                                      |
-| `includes()`                  | both strings, and output contains expectedOutput after NFKC, trim, and whitespace collapse; value is 1 or 0                                                                         |
-| `fitsSchema(schema)`          | output satisfies a Standard Schema (arktype, zod, valibot)                                                                                                                          |
-| `mentions(words)`             | output contains every word, case-insensitive; value is the fraction found                                                                                                           |
-| `avoids(words)`               | output contains none of the words                                                                                                                                                   |
-| `ranSteps(names)`             | `tool` and `step` names match `names`, order ignored; value is their F1. Agent trajectory comes from `stream()`. A reply-only send without `stream` does not satisfy `ranSteps([])` |
-| `stepsAtMost(n)`              | the run took at most `n` steps                                                                                                                                                      |
-| `under({ ms })`               | the run finished within `ms`                                                                                                                                                        |
-| `ask(q, { options, pass })`   | Jev picks an option named in `pass`                                                                                                                                                 |
-| `ask(q, { options, passAt })` | Jev picks an option; its credit (0..1) is the value and passes at `passAt`                                                                                                          |
-| `ask(q, { levels, pass })`    | Jev grades at level `pass` or above (levels lowest first)                                                                                                                           |
+| helper                        | passes when                                                                                                                                                                                                                             |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `matches(field?)`             | output deep-equals expectedOutput, or the same field (key or accessor) of each                                                                                                                                                          |
+| `includes()`                  | both strings, and output contains expectedOutput after NFKC, trim, and whitespace collapse; value is 1 or 0                                                                                                                             |
+| `fitsSchema(schema)`          | output satisfies a Standard Schema (arktype, zod, valibot)                                                                                                                                                                              |
+| `mentions(words)`             | output contains every word, case-insensitive; value is the fraction found                                                                                                                                                               |
+| `avoids(words)`               | output contains none of the words                                                                                                                                                                                                       |
+| `ranSteps(names)`             | `tool` and `step` names match `names`, order ignored; value is their F1. Agent trajectory comes from `stream()`. `ranSteps([])` fails when `steps` is empty. An observed model-only run (llm steps, no tool or step names) still passes |
+| `stepsAtMost(n)`              | the run took at most `n` steps                                                                                                                                                                                                          |
+| `under({ ms })`               | the run finished within `ms`                                                                                                                                                                                                            |
+| `ask(q, { options, pass })`   | Jev picks an option named in `pass`                                                                                                                                                                                                     |
+| `ask(q, { options, passAt })` | Jev picks an option; its credit (0..1) is the value and passes at `passAt`                                                                                                                                                              |
+| `ask(q, { levels, pass })`    | Jev grades at level `pass` or above (levels lowest first)                                                                                                                                                                               |
 
 `mentions` and `avoids` also take `(r) => words` for per-case words.
 `mentions` and `ranSteps` take `{ atLeast }` to pass on partial credit.
@@ -106,7 +106,8 @@ space cannot absorb — those fail closed by design.
   `tool.done` as `tool`). A policy deny emits `tool.done` without
   `tool.start`; the tool is still recorded when `inference.tool_call.end`
   or the assistant `tool_call` block names it. A reply-only send without
-  `stream` leaves `steps` empty, which does not satisfy `ranSteps([])`.
+  `stream` leaves `steps` empty, which fails `ranSteps([])`. An observed
+  model-only run still passes.
 - **Workflow**: `workflow(definition, { invokeStep })` from
   `@corbits/evals/workflow`. A definition cannot run locally without a
   step invoker, and the root never loads `@intx/workflow`, so a bare
@@ -123,7 +124,8 @@ attempt passes. `concurrency` (default 4) bounds cases in flight;
 ## Cases
 
 An array of `{ name?, input, expectedOutput?, must?, skip? }`, or the path of a
-JSONL file of the same objects. `name` keys the case in reports and
+JSONL file of the same objects. The ground-truth key is `expectedOutput`.
+`expect` and `expected` throw. `name` keys the case in reports and
 compared runs and defaults to the input.
 
 ## Passing
@@ -159,6 +161,8 @@ cases; `.report` holds every result.
 
 An experiment is each case × scorer pass and value — plus a Jev scorer's
 probability distribution and confidence — and `about`, no times.
+Saved files are format 2: `{ format: 2, name, cases }`. Any other `format`,
+including format 1, is rejected.
 `compare` only reads; a missing file skips drops. `save` only writes, on
 every run. One path for both compares with the last experiment, then replaces
 it. `compare` also takes an experiment from an earlier `runEvaluation` of the same
@@ -194,6 +198,20 @@ Exit codes:
 | 2    | the file is missing, the import failed, there is no spec export, or the evaluation did not run |
 
 `--format json` (and `--json`) come from incur and print only that result as JSON on stdout, with no human summary. Exit 1 is only a failed gate (`EVAL_FAILED`). Config that stops the run before it starts, such as empty `data` or a string or `ask` scorer with no `judge.invoke`, exits 2.
+
+## Workflow scorers
+
+`@corbits/evals/workflow` also exports four prebuilt one-step judges. Each
+takes a pinned `{ provider, model }` and does not call a model by itself:
+`faithfulness`, `answerRelevancy`, `correctness`, and `trajectoryAccuracy`.
+Pair them with `judgeModel` when you want those rubrics run. `includes` stays
+a code check on the root package.
+
+## Breaking changes
+
+- Saved experiments must be format 2 (`{ format: 2, name, cases }`). Format 1 is rejected.
+- JSONL rows use `expectedOutput`. `expect` and `expected` throw.
+- `ranSteps([])` fails when `steps` is empty. An observed model-only run still passes.
 
 ## Calibrating
 
