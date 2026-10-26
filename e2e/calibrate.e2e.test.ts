@@ -1,48 +1,43 @@
 import { describe, expect, test } from "bun:test";
-import type { EvaluateDeps } from "@corbits/system-one";
+import { defineAgent } from "@intx/agent";
+import { step, type StepInvoker } from "@intx/workflow";
 
-import { ask, calibrate, jev } from "../src/index.js";
-
-function stubDeps(fetch: EvaluateDeps["fetch"]): EvaluateDeps {
-  return {
-    fetch,
-    scheduler: {
-      setTimeout: ((fn: () => void, ms: number) => {
-        const t = setTimeout(fn, ms);
-        return () => clearTimeout(t);
-      }) as EvaluateDeps["scheduler"]["setTimeout"],
-      now: () => Date.now(),
-    },
-  };
-}
+import { ask, calibrate } from "../src/index.js";
+import { judgeModel } from "../src/workflow.js";
 
 /** Answers yes/no questions with the input's probability; choice questions pick ready/revise by it. */
 function stubCalibration(byInput: Record<string, number>) {
-  const fetch = (async (_url: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body)) as {
+  const invokeStep: StepInvoker = async (request) => {
+    const body = request.input as {
       state: { input: string };
       questions: Record<string, { type: string }>;
     };
     const p = byInput[body.state.input] ?? 0.5;
-    const answers = Object.fromEntries(
-      Object.entries(body.questions).map(([id, q]) => [
-        id,
-        q.type === "choice"
-          ? {
-              type: "choice",
-              choice: p >= 0.5 ? "ready" : "revise",
-              probabilities: { ready: p, revise: Math.round((1 - p) * 100) / 100 },
-              confidence: p,
-            }
-          : { type: "noul", noul: p },
-      ]),
+    const decisions = Object.entries(body.questions).map(([id, q]) =>
+      q.type === "choice"
+        ? {
+            id,
+            type: "choice",
+            choice: p >= 0.5 ? "ready" : "revise",
+            probabilities: { ready: p, revise: Math.round((1 - p) * 100) / 100 },
+            confidence: p,
+          }
+        : { id, type: "noul", noul: p },
     );
-    return new Response(JSON.stringify({ model: "jev-test", answers }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  }) as unknown as EvaluateDeps["fetch"];
-  return jev({ apiKey: "test-key", deps: stubDeps(fetch) });
+    return { output: { decisions } };
+  };
+  return judgeModel({
+    model: step({
+      agent: defineAgent({
+        id: "jev",
+        systemPrompt: "judge",
+        tools: [],
+        capabilities: [],
+        inference: { sources: [{ provider: "stub", model: "stub" }] },
+      }),
+    }),
+    invokeStep,
+  });
 }
 
 describe("calibrate", () => {

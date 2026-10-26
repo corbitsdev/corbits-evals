@@ -1,6 +1,6 @@
 import { matches } from "./checks.js";
 import { fromJsonl } from "./datasets.js";
-import { checkThresholds, jev, type Ask, type Judge, type Sentence } from "./jev.js";
+import { checkThresholds, type Ask, type Judge, type Sentence } from "./jev.js";
 import {
   flips,
   fromReport,
@@ -47,7 +47,7 @@ export type Evaluation<I, O, E> = {
   timeout?: Duration;
   /** Stamped into the experiment, e.g. `{ model }`. */
   about?: Record<string, unknown>;
-  /** Jev for string and `ask` scorers. Defaults to `jev()`. */
+  /** Jev for string and `ask` scorers. Those checks need `judge.invoke` from `judgeModel`. */
   judge?: Judge;
   /** Skip the console summary. */
   quiet?: boolean;
@@ -271,11 +271,16 @@ export async function runEvaluation<I, O, E>(spec: Evaluation<I, O, E>): Promise
   let judge: Judge | undefined = spec.judge;
   const defined = spec.scorers ?? { matches: matches() as Scorer<I, O, E> };
   const { code, jev: jevChecks } = toCheckParts(name, defined);
+  if (Object.keys(jevChecks).length > 0 && judge?.invoke === undefined) {
+    throw new Error(
+      `evaluation "${name}": string and ask checks need judge.invoke from judgeModel`,
+    );
+  }
   const checkNames = Object.keys(defined);
   const jevGroup =
-    Object.keys(jevChecks).length === 0
+    Object.keys(jevChecks).length === 0 || judge === undefined
       ? undefined
-      : { judge: (judge ??= jev()), checks: jevChecks };
+      : { judge, checks: jevChecks };
   const allowances = toAllowances(name, spec.allow ?? {}, checkNames);
   const cases = named(
     name,
