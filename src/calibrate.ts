@@ -11,7 +11,7 @@ import type { Outcome } from "./types.js";
 export type Labeled<I = unknown, E = unknown> = {
   name?: string;
   input: I;
-  expect?: E;
+  expectedOutput?: E;
   /** The expected verdict per check name. */
   labels: Readonly<Record<string, boolean>>;
 };
@@ -115,7 +115,7 @@ export async function calibrate<I, O, E = O>(
     const evalCase = {
       name: key,
       input: labeled.input,
-      ...(labeled.expect === undefined ? {} : { expect: labeled.expect }),
+      ...(labeled.expectedOutput === undefined ? {} : { expectedOutput: labeled.expectedOutput }),
     };
     const runResult = await runOnce(spec, evalCase);
     const decisions = await decideBatch(options.judge, options.checks, runResult);

@@ -77,11 +77,11 @@ const CASES: { id: string; question: string; expert: string; submission: string;
 const report = await runEvaluation({
   name: "port-factuality",
   task: (question: string) => CASES.find((c) => c.question === question)?.submission ?? "",
-  data: CASES.map((c) => ({ name: c.id, input: c.question, expect: c.expert })),
+  data: CASES.map((c) => ({ name: c.id, input: c.question, expectedOutput: c.expert })),
   scorers: {
     baseline_exact: matches(),
     jev_factuality: ask(
-      "Compare the factual content of the output with the expert answer in expect. Ignore style, grammar, punctuation. Pick one option.",
+      "Compare the factual content of the output with the expert answer in expectedOutput. Ignore style, grammar, punctuation. Pick one option.",
       { options: CRITERIA, pass: ["A", "B", "C", "E"] },
     ),
   },

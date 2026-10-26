@@ -39,10 +39,10 @@ const CASES: { id: string; reference: string; output: string; truth: boolean }[]
 const report = await runEvaluation({
   name: "port-keyword-coverage",
   task: (id: string) => CASES.find((c) => c.id === id)?.output ?? "",
-  data: CASES.map((c) => ({ input: c.id, expect: c.reference })),
+  data: CASES.map((c) => ({ input: c.id, expectedOutput: c.reference })),
   scorers: {
     baseline_exact: matches(),
-    port_coverage: (r) => coverage(r.expect ?? "", r.output) >= 0.5,
+    port_coverage: (r) => coverage(r.expectedOutput ?? "", r.output) >= 0.5,
   },
   allow: { baseline_exact: CASES.length, port_coverage: CASES.length },
 });
