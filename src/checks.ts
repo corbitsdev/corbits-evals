@@ -181,6 +181,13 @@ export function ranSteps(names: readonly string[], options: AtLeast = {}): Check
     const actual = stepNames(run).sort();
     const explanation = `expected [${expected.join(", ")}], got [${actual.join(", ")}]`;
     if (expected.length === 0) {
+      if (run.steps.length === 0) {
+        return {
+          pass: false,
+          value: 0,
+          explanation: "an empty step list is not an observed empty tool path",
+        };
+      }
       return { pass: actual.length === 0, value: actual.length === 0 ? 1 : 0, explanation };
     }
     const counts = new Map<string, number>();
