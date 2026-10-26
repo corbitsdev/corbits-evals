@@ -163,6 +163,35 @@ evaluation, with no file: `runEvaluation({ ...spec, compare: before.experiment }
 Flips print as `fixed` / `broke`, new and gone cases as `added` /
 `removed`. `quiet: true` skips the summary.
 
+## CLI
+
+The package bin is `corbits-eval` (`./dist/cli/index.js`).
+
+```sh
+corbits-eval run ./evals/refund.ts
+corbits-eval run ./evals/refund.ts --format json
+```
+
+The file is an ES module path resolved from the current working directory.
+`corbits-eval` loads the `evaluation` export when it is a spec object, otherwise
+the default export when that is a spec object, otherwise a zero-argument
+function on either of those exports. The function must return a spec. No other
+exports are read.
+
+A spec is the object `runEvaluation` accepts (`name`, `data`, `task`,
+`scorers`, and the rest). Case rows use `expectedOutput`. The CLI calls
+`runEvaluation`; it does not score on its own.
+
+Exit codes:
+
+| code | when                                                               |
+| ---- | ------------------------------------------------------------------ |
+| 0    | the run passed its gate                                            |
+| 1    | the evaluation failed its gate                                     |
+| 2    | the file is missing, the import failed, or there is no spec export |
+
+`--format json` (and `--json`) come from incur and print the result as JSON.
+
 ## Calibrating
 
 Thresholds are per-workload starting points, not constants. `calibrate`
