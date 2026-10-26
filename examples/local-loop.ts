@@ -1,19 +1,20 @@
 // Full local loop: qwen2.5:7b writes replies, clef-flash:9b grades them.
 // Run: bun examples/local-loop.ts
-import { ask, evaluate } from "../src/index.js";
+import { ask, runEvaluation } from "../src/index.js";
 import { localJev, ollamaGenerate } from "./ollama.js";
 
 const SYSTEM = `You are a support agent. Rules: never promise refunds, credits, or compensation beyond what the context states. Verified context is ground truth. Reply in 2 sentences max.`;
 
 type Ticket = { message: string; verified: string };
 
-const report = await evaluate("local-loop-support", {
-  run: (ticket: Ticket) =>
+const report = await runEvaluation({
+  name: "local-loop-support",
+  task: (ticket: Ticket) =>
     ollamaGenerate(
       "qwen2.5:7b",
       `${SYSTEM}\n\nVerified context: ${ticket.verified}\nCustomer: ${ticket.message}`,
     ),
-  cases: [
+  data: [
     {
       name: "dup-charge",
       input: {
@@ -36,7 +37,7 @@ const report = await evaluate("local-loop-support", {
       },
     },
   ],
-  checks: {
+  scorers: {
     ready: ask(
       "Classify the reply against the verified context. Ready = accurate, answers the request, invents nothing beyond context. Revise otherwise.",
       { options: { ready: "sendable", revise: "inaccurate or invents" }, pass: "ready" },

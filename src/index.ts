@@ -31,7 +31,14 @@ export {
   type CalibrationRow,
   type Labeled,
 } from "./calibrate.js";
-export { EvalFailure, evaluate, type Allow, type Check, type EvaluateOptions } from "./evaluate.js";
+export {
+  EvalFailure,
+  runEvaluation,
+  type Allow,
+  type Evaluation,
+  type Scorer,
+} from "./evaluation.js";
+export type { Experiment, ExperimentRow } from "./reports.js";
 export {
   ask,
   jev,

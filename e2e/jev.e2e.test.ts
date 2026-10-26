@@ -7,9 +7,9 @@ import type { EvaluateDeps } from "@corbits/system-one";
 import {
   ask,
   EvalFailure,
-  evaluate,
+  runEvaluation,
   jev,
-  type Check,
+  type Scorer,
   type Escalation,
   type Judge,
   type Outcome,
@@ -44,13 +44,14 @@ function stubJev(answer: unknown) {
   return { bodies, judge: jev({ apiKey: "test-key", deps: stubDeps(fetch) }) };
 }
 
-async function judged(check: Check<string, string, string>, judge: Judge) {
+async function judged(check: Scorer<string, string, string>, judge: Judge) {
   let report: Report;
   try {
-    report = await evaluate("jev", {
-      run: (input: string) => `reply to ${input}`,
-      cases: [{ input: "refund?", expect: "yes" }],
-      checks: { judged: check },
+    report = await runEvaluation({
+      name: "jev",
+      task: (input: string) => `reply to ${input}`,
+      data: [{ input: "refund?", expect: "yes" }],
+      scorers: { judged: check },
       judge,
     });
   } catch (cause) {
@@ -60,7 +61,7 @@ async function judged(check: Check<string, string, string>, judge: Judge) {
   return { outcome: report.cases[0]?.checks["judged"] };
 }
 
-async function answered(answer: unknown, check: Check<string, string, string>) {
+async function answered(answer: unknown, check: Scorer<string, string, string>) {
   const { bodies, judge } = stubJev(answer);
   return { ...(await judged(check, judge)), bodies };
 }
@@ -116,10 +117,11 @@ describe("sentence checks", () => {
 describe("batching", () => {
   test("a case's Jev checks answer in one call and map back by name", async () => {
     const { bodies, judge } = stubJev({ type: "noul", noul: 0.9 });
-    const report = await evaluate("jev", {
-      run: (input: string) => `reply to ${input}`,
-      cases: [{ input: "refund?" }],
-      checks: { ready: "Ready to send?", polite: "Is the tone polite?" },
+    const report = await runEvaluation({
+      name: "jev",
+      task: (input: string) => `reply to ${input}`,
+      data: [{ input: "refund?" }],
+      scorers: { ready: "Ready to send?", polite: "Is the tone polite?" },
       judge,
     });
     expect(bodies).toHaveLength(1);
@@ -142,10 +144,11 @@ describe("batching", () => {
     }) as unknown as EvaluateDeps["fetch"];
     let report: Report;
     try {
-      await evaluate("jev", {
-        run: (input: string) => input,
-        cases: [{ input: "a" }],
-        checks: { ready: "Ready to send?", polite: "Is the tone polite?" },
+      await runEvaluation({
+        name: "jev",
+        task: (input: string) => input,
+        data: [{ input: "a" }],
+        scorers: { ready: "Ready to send?", polite: "Is the tone polite?" },
         judge: jev({ apiKey: "test-key", deps: stubDeps(failing) }),
       });
       throw new Error("expected failure");
@@ -162,10 +165,11 @@ describe("batching", () => {
 
   test("a case that skips one Jev check keeps it out of the call", async () => {
     const { bodies, judge } = stubJev({ type: "noul", noul: 0.9 });
-    await evaluate("jev", {
-      run: (input: string) => input,
-      cases: [{ input: "a", skip: ["polite"] }],
-      checks: { ready: "Ready to send?", polite: "Is the tone polite?" },
+    await runEvaluation({
+      name: "jev",
+      task: (input: string) => input,
+      data: [{ input: "a", skip: ["polite"] }],
+      scorers: { ready: "Ready to send?", polite: "Is the tone polite?" },
       judge,
     });
     expect(Object.keys(bodies[0]?.["questions"] as object)).toEqual(["ready"]);
@@ -240,7 +244,7 @@ describe("thresholds", () => {
     await expect(judged({ question, yes: 0.2, no: 0.5 }, judge)).rejects.toThrow(
       "no must not exceed yes",
     );
-    // Even a hand-built ask (bypassing ask()) is validated at evaluate time.
+    // Even a hand-built ask (bypassing ask()) is validated at runEvaluation time.
     await expect(
       judged({ question: "Ready?", options: { a: "a" }, pass: ["a"], sure: 0 }, judge),
     ).rejects.toThrow("sure must be in (0, 1]");
@@ -514,10 +518,11 @@ describe("stored reports", () => {
         probabilities: { ready: 0.8, revise: 0.1, escalate: 0.1 },
         confidence: 0.8,
       };
-      await evaluate("jev", {
-        run: (input: string) => `reply to ${input}`,
-        cases: [{ input: "refund?" }],
-        checks: {
+      await runEvaluation({
+        name: "jev",
+        task: (input: string) => `reply to ${input}`,
+        data: [{ input: "refund?" }],
+        scorers: {
           judged: ask("Ready to send?", {
             options: { ready: "send", revise: "work", escalate: "human" },
             pass: "ready",

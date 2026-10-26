@@ -2,32 +2,32 @@ import type { CaseResult, Change, CheckResult, Outcome, Report } from "./types.j
 
 type Row = Record<string, unknown>;
 
-/** A report without its methods. */
-export type ReportData = Omit<Report, "markdown">;
+/** A report without its methods or its experiment. */
+export type ReportData = Omit<Report, "markdown" | "experiment">;
 
-/** Per case × check pass and value, without times, so it diffs cleanly in git. */
-export type Stored = {
-  eval: string;
+/** Per case × scorer pass and value, without times, so it diffs cleanly in git. */
+export type Experiment = {
+  name: string;
   about?: Record<string, unknown>;
-  cases: Record<string, Record<string, StoredRow>>;
+  cases: Record<string, Record<string, ExperimentRow>>;
 };
 
-/** One check's stored answer: the outcome plus a Jev distribution when present. */
-export type StoredRow = {
+/** One scorer's stored answer: the outcome plus a Jev distribution when present. */
+export type ExperimentRow = {
   pass: boolean;
   value: number;
   probabilities?: Record<string, number>;
   confidence?: number;
 };
 
-const STORED_FORMAT = 1;
+const STORED_FORMAT = 2;
 
 function round(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
-export function fromReport(report: ReportData): Stored {
-  const cases: Stored["cases"] = {};
+export function fromReport(report: ReportData): Experiment {
+  const cases: Experiment["cases"] = {};
   for (const c of report.cases) {
     cases[c.name] = Object.fromEntries(
       Object.entries(c.checks).map(([name, o]) => [
@@ -48,7 +48,7 @@ export function fromReport(report: ReportData): Stored {
     );
   }
   return {
-    eval: report.name,
+    name: report.name,
     ...(report.about === undefined ? {} : { about: report.about }),
     cases,
   };
@@ -62,7 +62,7 @@ function isObject(value: unknown): value is Row {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function stored(raw: unknown, where: string): StoredRow {
+function stored(raw: unknown, where: string): ExperimentRow {
   if (!isObject(raw) || typeof raw["pass"] !== "boolean") {
     throw new Error(`${where}: "pass" must be a boolean`);
   }
@@ -70,7 +70,7 @@ function stored(raw: unknown, where: string): StoredRow {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`${where}: "value" must be a finite number`);
   }
-  const row: StoredRow = { pass: raw["pass"], value };
+  const row: ExperimentRow = { pass: raw["pass"], value };
   const probabilities = raw["probabilities"];
   if (probabilities !== undefined) {
     if (!isObject(probabilities)) {
@@ -93,7 +93,7 @@ function stored(raw: unknown, where: string): StoredRow {
   return row;
 }
 
-export function parseStored(text: string, source: string): Stored {
+export function parseStored(text: string, source: string): Experiment {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -106,12 +106,12 @@ export function parseStored(text: string, source: string): Stored {
       `${source}: unknown format ${JSON.stringify(raw["format"])}, expected ${STORED_FORMAT}`,
     );
   }
-  const name = raw["eval"];
+  const name = raw["name"];
   if (typeof name !== "string" || name === "") {
-    throw new Error(`${source}: "eval" must be a non-empty string`);
+    throw new Error(`${source}: "name" must be a non-empty string`);
   }
   if (!isObject(raw["cases"])) throw new Error(`${source}: "cases" must be an object`);
-  const cases: Stored["cases"] = {};
+  const cases: Experiment["cases"] = {};
   for (const [caseName, checks] of Object.entries(raw["cases"])) {
     if (!isObject(checks)) throw new Error(`${source}: case "${caseName}" must be an object`);
     cases[caseName] = Object.fromEntries(
@@ -121,7 +121,7 @@ export function parseStored(text: string, source: string): Stored {
       ]),
     );
   }
-  const run: Stored = { eval: name, cases };
+  const run: Experiment = { name, cases };
   const about = raw["about"];
   if (about !== undefined) {
     if (!isObject(about)) throw new Error(`${source}: "about" must be an object`);
@@ -131,7 +131,7 @@ export function parseStored(text: string, source: string): Stored {
 }
 
 /** Case × check pass flips. Cases or checks on one side only are not changes. */
-export function flips(stored: Stored, cases: readonly CaseResult[]): Change[] {
+export function flips(stored: Experiment, cases: readonly CaseResult[]): Change[] {
   const changes: Change[] = [];
   for (const c of cases) {
     const before = stored.cases[c.name];
@@ -166,7 +166,7 @@ export function toMarkdown(report: ReportData): string {
   const names = Object.keys(report.checks);
   const comparing = report.changes !== undefined;
   const lines = [
-    `# eval: ${cell(report.name)}`,
+    `# evaluation: ${cell(report.name)}`,
     ``,
     `- cases: ${report.total}, passed: ${report.passed}`,
     `- result: ${report.ok ? "ok" : "FAILED"}`,

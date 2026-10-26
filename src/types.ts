@@ -1,3 +1,5 @@
+import type { Experiment } from "./reports.js";
+
 export type Step = {
   name: string;
   kind: "llm" | "tool" | "step";
@@ -90,7 +92,9 @@ export type Report<I = unknown, O = unknown, E = unknown> = {
   changes?: Change[];
   /** Cases only in this run. Present when comparing. */
   added?: string[];
-  /** Cases only in the compared run. Present when comparing. */
+  /** Cases only in the compared experiment. Present when comparing. */
   removed?: string[];
+  /** The persisted experiment for this run. */
+  experiment: Experiment;
   markdown(): string;
 };

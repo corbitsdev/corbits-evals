@@ -1,6 +1,6 @@
 // 1-10 helpfulness as Jev levels. Rank order of four answers is the
 // ground truth. Run: bun examples/ports/mtbench-score.ts
-import { ask, evaluate } from "../../src/index.js";
+import { ask, runEvaluation } from "../../src/index.js";
 import { localJev } from "../ollama.js";
 
 const LEVELS = [
@@ -25,11 +25,12 @@ const CASES: { id: string; rank: number; answer: string }[] = [
   { id: "wrong", rank: 4, answer: "The capital of France is Lyon, a lovely city." },
 ];
 
-const report = await evaluate("port-mtbench-score", {
-  run: (input: { question: string; id: string }) =>
+const report = await runEvaluation({
+  name: "port-mtbench-score",
+  task: (input: { question: string; id: string }) =>
     CASES.find((c) => c.id === input.id)?.answer ?? "",
-  cases: CASES.map((c) => ({ name: c.id, input: { question: QUESTION, id: c.id } })),
-  checks: {
+  data: CASES.map((c) => ({ name: c.id, input: { question: QUESTION, id: c.id } })),
+  scorers: {
     jev_helpfulness: ask(
       "Rate the output's helpfulness and correctness for the question. A bare fragment with no explanation caps at 5. A complete correct answer with supporting detail scores 8+. A wrong answer scores 1-2.",
       { levels: LEVELS, pass: "6: good" },
