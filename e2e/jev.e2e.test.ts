@@ -50,7 +50,7 @@ async function judged(check: Scorer<string, string, string>, judge: Judge) {
     report = await runEvaluation({
       name: "jev",
       task: (input: string) => `reply to ${input}`,
-      data: [{ input: "refund?", expect: "yes" }],
+      data: [{ input: "refund?", expectedOutput: "yes" }],
       scorers: { judged: check },
       judge,
     });
@@ -81,7 +81,7 @@ describe("sentence checks", () => {
     expect(bodies[0]?.["state"]).toEqual({
       input: "refund?",
       output: "reply to refund?",
-      expect: "yes",
+      expectedOutput: "yes",
     });
     expect(bodies[0]?.["questions"]).toEqual({ judged: { type: "noul", instructions: question } });
   });

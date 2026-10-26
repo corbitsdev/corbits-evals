@@ -35,8 +35,8 @@ console.log(report.markdown());
 ## Checks
 
 `checks` maps a name to a check. Without `checks`, one `matches` check
-compares output with `expect`. Every check gets the run
-`r = { input, output, expect, steps, ms }`; `output` is whatever the run
+compares output with `expectedOutput`. Every check gets the run
+`r = { input, output, expectedOutput, steps, ms }`; `output` is whatever the run
 returned.
 
 - **Code**: `(r) => boolean | number`, sync or async. A number is 0..1
@@ -47,18 +47,18 @@ returned.
   `unsure (p=…)` in between. `{ question, yes, no }` sets its own bars.
 - **Helpers**:
 
-| helper                        | passes when                                                                |
-| ----------------------------- | -------------------------------------------------------------------------- |
-| `matches(field?)`             | output deep-equals expect, or the same field (key or accessor) of each     |
-| `fitsSchema(schema)`          | output satisfies a Standard Schema (arktype, zod, valibot)                 |
-| `mentions(words)`             | output contains every word, case-insensitive; value is the fraction found  |
-| `avoids(words)`               | output contains none of the words                                          |
-| `ranSteps(names)`             | `tool` and `step` names match `names`, order ignored; value is their F1    |
-| `stepsAtMost(n)`              | the run took at most `n` steps                                             |
-| `under({ ms })`               | the run finished within `ms`                                               |
-| `ask(q, { options, pass })`   | Jev picks an option named in `pass`                                        |
-| `ask(q, { options, passAt })` | Jev picks an option; its credit (0..1) is the value and passes at `passAt` |
-| `ask(q, { levels, pass })`    | Jev grades at level `pass` or above (levels lowest first)                  |
+| helper                        | passes when                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| `matches(field?)`             | output deep-equals expectedOutput, or the same field (key or accessor) of each |
+| `fitsSchema(schema)`          | output satisfies a Standard Schema (arktype, zod, valibot)                     |
+| `mentions(words)`             | output contains every word, case-insensitive; value is the fraction found      |
+| `avoids(words)`               | output contains none of the words                                              |
+| `ranSteps(names)`             | `tool` and `step` names match `names`, order ignored; value is their F1        |
+| `stepsAtMost(n)`              | the run took at most `n` steps                                                 |
+| `under({ ms })`               | the run finished within `ms`                                                   |
+| `ask(q, { options, pass })`   | Jev picks an option named in `pass`                                            |
+| `ask(q, { options, passAt })` | Jev picks an option; its credit (0..1) is the value and passes at `passAt`     |
+| `ask(q, { levels, pass })`    | Jev grades at level `pass` or above (levels lowest first)                      |
 
 `mentions` and `avoids` also take `(r) => words` for per-case words.
 `mentions` and `ranSteps` take `{ atLeast }` to pass on partial credit.
@@ -68,7 +68,7 @@ returned.
 A check that throws, hangs past `timeout`, or returns anything else fails
 itself closed; its siblings still run. Jev transport failures fail closed.
 
-Jev sees `{ input, output, expect, steps }`, and a case's string and
+Jev sees `{ input, output, expectedOutput, steps }`, and a case's string and
 `ask` checks answer in one call. Configure it with
 `judge: jev({ endpoint, model, apiKey, timeout })`; `endpoint` is
 `"official"` (default), `"gateway"` or a URL. Without an `apiKey` the
@@ -112,7 +112,7 @@ attempt passes. `concurrency` (default 4) bounds cases in flight;
 
 ## Cases
 
-An array of `{ name?, input, expect?, must?, skip? }`, or the path of a
+An array of `{ name?, input, expectedOutput?, must?, skip? }`, or the path of a
 JSONL file of the same objects. `name` keys the case in reports and
 compared runs and defaults to the input.
 
@@ -165,7 +165,7 @@ verdicts agree, land unsure, or confidently disagree at each threshold:
 ```ts
 const table = await calibrate("refund-agent", {
   run: refundAgent,
-  cases: labeledCases, // { input, expect?, labels: { readyToSend: true } }
+  cases: labeledCases, // { input, expectedOutput?, labels: { readyToSend: true } }
   checks: { readyToSend: "Is this reply ready to send to the customer?" },
   judge,
 });

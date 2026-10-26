@@ -27,7 +27,7 @@ export function toOutcome(name: string, raw: unknown): Outcome {
   };
 }
 
-/** Output deep-equals expect, or one field of each (a key or an accessor). */
+/** Output deep-equals expectedOutput, or one field of each (a key or an accessor). */
 export function matches<T = unknown>(
   field?: string | ((value: T) => unknown),
 ): CheckFn<unknown, T, T> {
@@ -38,10 +38,11 @@ export function matches<T = unknown>(
       ? (value as Record<string, unknown>)[field]
       : undefined;
   };
-  return ({ output, expect }) => {
-    if (expect === undefined) return { pass: false, value: 0, explanation: "case has no expect" };
+  return ({ output, expectedOutput }) => {
+    if (expectedOutput === undefined)
+      return { pass: false, value: 0, explanation: "case has no expectedOutput" };
     const got = get(output);
-    const want = get(expect);
+    const want = get(expectedOutput);
     if (Bun.deepEquals(got, want)) return true;
     return {
       pass: false,
@@ -73,7 +74,7 @@ export function fitsSchema(schema: StandardSchema): CheckFn {
   };
 }
 
-/** Fixed words, or words picked per case (e.g. from `expect`). */
+/** Fixed words, or words picked per case (e.g. from `expectedOutput`). */
 export type Words<I = unknown, O = unknown, E = unknown> =
   | readonly string[]
   | ((run: Run<I, O, E>) => readonly string[]);

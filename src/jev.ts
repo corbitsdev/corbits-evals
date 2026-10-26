@@ -328,7 +328,7 @@ export function toOutcome(
 
 function toState(run: Run): Record<string, unknown> {
   const state: Record<string, unknown> = { input: run.input, output: run.output };
-  if (run.expect !== undefined) state["expect"] = run.expect;
+  if (run.expectedOutput !== undefined) state["expectedOutput"] = run.expectedOutput;
   if (run.steps.length > 0) state["steps"] = run.steps;
   return state;
 }

@@ -39,7 +39,7 @@ describe("workflow runs", () => {
     const report = await runEvaluation({
       name: "workflow",
       task: workflow<string, string>(pipeline, { invokeStep }),
-      data: [{ input: "refund me", expect: "DRAFT: REFUND ME" }],
+      data: [{ input: "refund me", expectedOutput: "DRAFT: REFUND ME" }],
       scorers: {
         exact: matches(),
         order: (r) => r.steps.map((s) => s.name).join(">") === "drafter>reviewer",
@@ -68,7 +68,10 @@ describe("workflow runs", () => {
         output: (run) => ({ draft: run.outputs["draft"], review: run.outputs["review"] }),
       }),
       data: [
-        { input: { order: 42 }, expect: { draft: "draft: order 42", review: "DRAFT: ORDER 42" } },
+        {
+          input: { order: 42 },
+          expectedOutput: { draft: "draft: order 42", review: "DRAFT: ORDER 42" },
+        },
       ],
     });
     expect(report.ok).toBe(true);
@@ -84,7 +87,7 @@ describe("workflow runs", () => {
             return { output: "draft" };
           },
         }),
-        data: [{ input: "x", expect: "X" }],
+        data: [{ input: "x", expectedOutput: "X" }],
       });
       throw new Error("expected a failure");
     } catch (cause) {

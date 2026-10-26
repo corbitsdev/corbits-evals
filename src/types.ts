@@ -12,7 +12,7 @@ export type Case<I = unknown, E = unknown> = {
   /** Keys the case in reports and compared runs. Defaults to the input. */
   name?: string;
   input: I;
-  expect?: E;
+  expectedOutput?: E;
   /** Checks that must pass on this case, whatever `allow` says. */
   must?: readonly string[];
   /** Checks this case is not run or counted for. */
@@ -23,7 +23,7 @@ export type Case<I = unknown, E = unknown> = {
 export type Run<I = unknown, O = unknown, E = unknown> = {
   input: I;
   output: O;
-  expect?: E;
+  expectedOutput?: E;
   steps: Step[];
   ms: number;
 };
@@ -51,7 +51,7 @@ export type CheckFn<I = unknown, O = unknown, E = unknown> = (
 export type CaseResult<I = unknown, O = unknown, E = unknown> = {
   name: string;
   input: I;
-  expect?: E;
+  expectedOutput?: E;
   output?: O;
   steps: Step[];
   /** Whole case: every attempt's run plus checks. */

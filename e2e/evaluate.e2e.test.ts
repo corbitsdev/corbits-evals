@@ -39,8 +39,8 @@ describe("runs", () => {
       name: "upper",
       task: upper,
       data: [
-        { input: "hi", expect: "HI" },
-        { name: "yo", input: "yo", expect: "YO" },
+        { input: "hi", expectedOutput: "HI" },
+        { name: "yo", input: "yo", expectedOutput: "YO" },
       ],
     });
     expect(report.ok).toBe(true);
@@ -60,7 +60,7 @@ describe("runs", () => {
     const report = await runEvaluation({
       name: "agent",
       task: agent,
-      data: [{ input: "refund", expect: "re: refund" }],
+      data: [{ input: "refund", expectedOutput: "re: refund" }],
     });
     expect(report.ok).toBe(true);
     expect(seen[0]).toBeInstanceOf(AbortSignal);
@@ -86,7 +86,7 @@ describe("runs", () => {
     const report = await runEvaluation({
       name: "objects",
       task: (input: { amount: number }) => ({ decision: "refund", amount: input.amount }),
-      data: [{ input: { amount: 5 }, expect: { decision: "refund", amount: 5 } }],
+      data: [{ input: { amount: 5 }, expectedOutput: { decision: "refund", amount: 5 } }],
       scorers: {
         whole: matches(),
         decision: matches("decision"),
@@ -102,7 +102,7 @@ describe("runs", () => {
     const path = join(dir, "cases.jsonl");
     await Bun.write(
       path,
-      '{"name":"a","input":"hi","expect":"HI"}\n\n{"input":"yo","expect":"YO"}\n',
+      '{"name":"a","input":"hi","expectedOutput":"HI"}\n\n{"input":"yo","expectedOutput":"YO"}\n',
     );
     const report = await runEvaluation({ name: "jsonl", task: upper, data: path });
     expect(report.cases.map((c) => c.name)).toEqual(["a", "yo"]);
@@ -190,7 +190,7 @@ describe("checks", () => {
     const err = await failure(
       runEvaluation({ name: "no-expect", task: upper, data: [{ input: "hi" }] }),
     );
-    expect(err.report.cases[0]?.checks["matches"]?.explanation).toBe("case has no expect");
+    expect(err.report.cases[0]?.checks["matches"]?.explanation).toBe("case has no expectedOutput");
   });
 
   test("a throwing, hanging or malformed check fails itself closed, not its siblings", async () => {
@@ -198,7 +198,7 @@ describe("checks", () => {
       runEvaluation({
         name: "bad-checks",
         task: upper,
-        data: [{ input: "hi", expect: "HI" }],
+        data: [{ input: "hi", expectedOutput: "HI" }],
         scorers: {
           exact: matches(),
           boom: () => {
@@ -273,7 +273,7 @@ describe("gates", () => {
   });
 
   test("bad options are rejected up front", async () => {
-    const base = { task: upper, data: [{ input: "a", expect: "A" }] };
+    const base = { task: upper, data: [{ input: "a", expectedOutput: "A" }] };
     await expect(runEvaluation({ name: "o", ...base, concurrency: Number.NaN })).rejects.toThrow(
       "concurrency",
     );
@@ -293,7 +293,7 @@ describe("gates", () => {
       runEvaluation({
         name: "md",
         task: upper,
-        data: [{ name: "a|b\nc", input: "<x>", expect: "no" }],
+        data: [{ name: "a|b\nc", input: "<x>", expectedOutput: "no" }],
       }),
     );
     const md = err.report.markdown();
@@ -306,9 +306,9 @@ describe("gates", () => {
 
 describe("passing", () => {
   const cases = [
-    { name: "a", input: "a", expect: "A" },
-    { name: "b", input: "b", expect: "B" },
-    { name: "c", input: "c", expect: "nope" },
+    { name: "a", input: "a", expectedOutput: "A" },
+    { name: "b", input: "b", expectedOutput: "B" },
+    { name: "c", input: "c", expectedOutput: "nope" },
   ];
   const checks = { exact: matches(), short: (r: { output: string }) => r.output.length === 1 };
 
@@ -368,7 +368,7 @@ describe("passing", () => {
       scorers: {
         exact: (r) => {
           seen.push(r.input);
-          return r.output === r.expect;
+          return r.output === r.expectedOutput;
         },
       },
     });
@@ -382,7 +382,7 @@ describe("passing", () => {
     const path = join(await tempDir(), "cases.jsonl");
     await Bun.write(
       path,
-      '{"name":"a","input":"a","expect":"A","must":["exact"]}\n{"name":"c","input":"c","expect":"nope","skip":["exact"]}\n',
+      '{"name":"a","input":"a","expectedOutput":"A","must":["exact"]}\n{"name":"c","input":"c","expectedOutput":"nope","skip":["exact"]}\n',
     );
     const report = await runEvaluation({
       name: "jsonl-must",
@@ -429,9 +429,9 @@ describe("passing", () => {
 
 describe("compare and save", () => {
   const cases = [
-    { name: "a", input: "a", expect: "A" },
-    { name: "b", input: "b", expect: "B" },
-    { name: "c", input: "c", expect: "nope" },
+    { name: "a", input: "a", expectedOutput: "A" },
+    { name: "b", input: "b", expectedOutput: "B" },
+    { name: "c", input: "c", expectedOutput: "nope" },
   ];
   const allow = { matches: { miss: 2 } };
   const swap = (input: string) => (input === "b" ? "?" : input === "c" ? "nope" : "A");
@@ -566,7 +566,7 @@ describe("compare and save", () => {
 
   test("added and removed cases are reported, not counted as drops", async () => {
     const before = await runEvaluation({ name: "upper", task: upper, data: cases, allow });
-    const changed = [...cases.slice(1), { name: "d", input: "d", expect: "nope" }];
+    const changed = [...cases.slice(1), { name: "d", input: "d", expectedOutput: "nope" }];
     const report = await runEvaluation({
       name: "upper",
       task: upper,
