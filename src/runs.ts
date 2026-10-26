@@ -22,7 +22,7 @@ export type Traced<I, O> = {
 
 export type Runnable<I, O> = RunFn<I, O> | Traced<I, O> | AgentLike;
 
-const NOT_RUNNABLE = "run must be a function, an @intx/agent Agent, or workflow()";
+const NOT_RUNNABLE = "must be a function, an @intx/agent Agent, or workflow()";
 
 function isWorkflowDefinition(value: object): boolean {
   return "stepOrder" in value && "steps" in value && "triggers" in value;
@@ -34,12 +34,13 @@ function isWorkflowDefinition(value: object): boolean {
  */
 export function toTraced<I, O>(
   run: Runnable<I, O>,
+  noun = "run",
 ): (input: I, signal: AbortSignal) => Promise<Trace<O>> {
   if (typeof run === "function") {
     return async (input, signal) => ({ output: await run(input, signal), steps: [] });
   }
   if (typeof run !== "object" || run === null) {
-    throw new Error(NOT_RUNNABLE);
+    throw new Error(`${noun} ${NOT_RUNNABLE}`);
   }
   if (TRACE in run) return run[TRACE];
   if ("send" in run && typeof run.send === "function") {
@@ -52,7 +53,7 @@ export function toTraced<I, O>(
     };
   }
   if (isWorkflowDefinition(run)) {
-    throw new Error('run: wrap a workflow with workflow() from "@corbits/evals/workflow"');
+    throw new Error(`${noun}: wrap a workflow with workflow() from "@corbits/evals/workflow"`);
   }
-  throw new Error(NOT_RUNNABLE);
+  throw new Error(`${noun} ${NOT_RUNNABLE}`);
 }

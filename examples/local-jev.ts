@@ -1,6 +1,6 @@
 // Local Jev judge over canned support drafts (good, invented-compensation,
 // refusal). Run: bun examples/local-jev.ts
-import { ask, evaluate } from "../src/index.js";
+import { ask, runEvaluation } from "../src/index.js";
 import { localJev } from "./ollama.js";
 
 const DRAFTS: Record<string, string> = {
@@ -12,10 +12,11 @@ const DRAFTS: Record<string, string> = {
   escalate: "I can't help with that. Goodbye.",
 };
 
-const report = await evaluate("local-jev-support", {
-  run: (id: string) => DRAFTS[id] ?? "",
-  cases: Object.keys(DRAFTS).map((id) => ({ input: id })),
-  checks: {
+const report = await runEvaluation({
+  name: "local-jev-support",
+  task: (id: string) => DRAFTS[id] ?? "",
+  data: Object.keys(DRAFTS).map((id) => ({ input: id })),
+  scorers: {
     ready: ask(
       "Classify the draft reply. Ready means accurate, answers the request, invents nothing. Unsafe means it invents refunds, credits, or policies.",
       {

@@ -14,12 +14,13 @@ Bun only (>=1.2.0).
 ## Example
 
 ```ts
-import { evaluate, mentions, under } from "@corbits/evals";
+import { mentions, runEvaluation, under } from "@corbits/evals";
 
-const report = await evaluate("refund-agent", {
-  run: refundAgent, // an @intx/agent Agent, workflow(), or (input) => output
-  cases: [{ name: "duplicate charge", input: "I was charged twice" }],
-  checks: {
+const report = await runEvaluation({
+  name: "refund-agent",
+  task: refundAgent, // an @intx/agent Agent, workflow(), or (input) => output
+  data: [{ name: "duplicate charge", input: "I was charged twice" }],
+  scorers: {
     refunds: mentions(["refund"]),
     readyToSend: "Is this reply ready to send to the customer?",
     fast: under({ ms: 5_000 }),
@@ -118,12 +119,13 @@ compared runs and defaults to the input.
 ## Passing
 
 ```ts
-await evaluate("judge", {
-  run,
-  cases, // a case can say { must: ["tests"], skip: ["docs"] }
-  checks,
+await runEvaluation({
+  name: "judge",
+  task: run,
+  data, // a case can say { must: ["tests"], skip: ["docs"] }
+  scorers,
   compare: "evals/judge.last.json", // read: measure drops against it
-  save: "evals/judge.last.json", // write: store this run, pass or fail
+  save: "evals/judge.last.json", // write: store this experiment, pass or fail
   allow: {
     tests: { miss: 1, drop: 0 },
     docs: { miss: 5, drop: 2 },
@@ -141,16 +143,16 @@ Per check, `allow` sets (default 0):
 A case's `must` checks must pass whatever `allow` says; its `skip` checks
 are not run or counted.
 
-`evaluate` prints each check's passes, misses and drops, and rejects with
-`EvalFailure` naming the limit each failing check broke and its failed
+`runEvaluation` prints each scorer's passes, misses and drops, and rejects with
+`EvalFailure` naming the limit each failing scorer broke and its failed
 cases; `.report` holds every result.
 
-A stored run is each case × check pass and value — plus a Jev check's
+An experiment is each case × scorer pass and value — plus a Jev scorer's
 probability distribution and confidence — and `about`, no times.
 `compare` only reads; a missing file skips drops. `save` only writes, on
-every run. One path for both compares with the last run, then replaces
-it. `compare` also takes a report from an earlier `evaluate` of the same
-eval, with no file: `evaluate(name, { ...options, compare: before })`.
+every run. One path for both compares with the last experiment, then replaces
+it. `compare` also takes an experiment from an earlier `runEvaluation` of the same
+evaluation, with no file: `runEvaluation({ ...spec, compare: before.experiment })`.
 Flips print as `fixed` / `broke`, new and gone cases as `added` /
 `removed`. `quiet: true` skips the summary.
 

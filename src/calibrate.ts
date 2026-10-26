@@ -1,6 +1,6 @@
 import type { Decision } from "@corbits/system-one";
 
-import { caseName } from "./evaluate.js";
+import { caseName } from "./evaluation.js";
 import { DEFAULTS, decideBatch, toOutcome, type Ask, type Judge, type Sentence } from "./jev.js";
 import { mapPool, runOnce, type RunSpec } from "./runner.js";
 import { toTraced, type Runnable } from "./runs.js";

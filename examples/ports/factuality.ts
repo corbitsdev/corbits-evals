@@ -1,7 +1,7 @@
 // ABCDE factuality rubric: A, B, C and E count as factual, D does not.
 // Agreement vs ground truth is the metric; exact match is the baseline.
 // Run: bun examples/ports/factuality.ts
-import { ask, evaluate, matches } from "../../src/index.js";
+import { ask, runEvaluation, matches } from "../../src/index.js";
 import { localJev } from "../ollama.js";
 
 const CRITERIA = {
@@ -74,10 +74,11 @@ const CASES: { id: string; question: string; expert: string; submission: string;
     },
   ];
 
-const report = await evaluate("port-factuality", {
-  run: (question: string) => CASES.find((c) => c.question === question)?.submission ?? "",
-  cases: CASES.map((c) => ({ name: c.id, input: c.question, expect: c.expert })),
-  checks: {
+const report = await runEvaluation({
+  name: "port-factuality",
+  task: (question: string) => CASES.find((c) => c.question === question)?.submission ?? "",
+  data: CASES.map((c) => ({ name: c.id, input: c.question, expect: c.expert })),
+  scorers: {
     baseline_exact: matches(),
     jev_factuality: ask(
       "Compare the factual content of the output with the expert answer in expect. Ignore style, grammar, punctuation. Pick one option.",

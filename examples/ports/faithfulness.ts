@@ -1,7 +1,7 @@
 // Claim-checking (extract claims, verify each against context) as one
 // Jev choice. Keyword coverage passes the vocab-reuse trap; the judge
 // must catch it. Run: bun examples/ports/faithfulness.ts
-import { ask, evaluate } from "../../src/index.js";
+import { ask, runEvaluation } from "../../src/index.js";
 import { localJev } from "../ollama.js";
 import { coverage } from "../words.js";
 
@@ -53,10 +53,11 @@ const CASES: { id: string; context: string; answer: string; truth: Truth }[] = [
 ];
 
 // The context goes in as the input, so Jev sees it next to the answer.
-const report = await evaluate("port-faithfulness", {
-  run: (context: string) => CASES.find((c) => c.context === context)?.answer ?? "",
-  cases: CASES.map((c) => ({ name: c.id, input: c.context })),
-  checks: {
+const report = await runEvaluation({
+  name: "port-faithfulness",
+  task: (context: string) => CASES.find((c) => c.context === context)?.answer ?? "",
+  data: CASES.map((c) => ({ name: c.id, input: c.context })),
+  scorers: {
     baseline_coverage: (r) => coverage(r.input, r.output) >= 0.5,
     jev_faithfulness: ask(
       "Is every claim in the output grounded in the context given as input? Pick one option.",
