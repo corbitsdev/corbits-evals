@@ -22,7 +22,7 @@ export type CalibrateOptions<I, O, E> = {
   checks: Record<string, Ask | Sentence | string>;
   judge: Judge;
   concurrency?: number;
-  /** Bounds each case run. The Jev call is bounded by `judge.timeout`. */
+  /** Bounds each case run. The judge step is bounded by its own timeout. */
   timeout?: Duration;
 };
 
@@ -140,7 +140,6 @@ export async function calibrate<I, O, E = O>(
     const rows: CalibrationRow[] = [];
     for (const threshold of GRID) {
       const judge: Judge = {
-        config: {},
         thresholds: isQuestion
           ? { yes: base.yes, no: base.no, sure: threshold }
           : { yes: threshold, no: r3(1 - threshold), sure: base.sure },

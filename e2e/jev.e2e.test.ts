@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { EvaluateDeps } from "@corbits/system-one";
+import { defineAgent } from "@intx/agent";
+import { defineWorkflow, step, type StepInvoker, type WorkflowDefinition } from "@intx/workflow";
 
 import {
   ask,
@@ -15,33 +16,37 @@ import {
   type Outcome,
   type Report,
 } from "../src/index.js";
+import { judgeModel } from "../src/workflow.js";
 
-function stubDeps(fetch: EvaluateDeps["fetch"]): EvaluateDeps {
-  return {
-    fetch,
-    scheduler: {
-      setTimeout: ((fn: () => void, ms: number) => {
-        const t = setTimeout(fn, ms);
-        return () => clearTimeout(t);
-      }) as EvaluateDeps["scheduler"]["setTimeout"],
-      now: () => Date.now(),
-    },
-  };
+function judgeAgent(sources: readonly { provider: string; model: string }[]) {
+  return defineAgent({
+    id: "jev",
+    systemPrompt: "judge",
+    tools: [],
+    capabilities: [],
+    inference: { sources },
+  });
 }
 
-/** Answers every question on a POST with `answer` and records the request bodies. */
-function stubJev(answer: unknown) {
+/** Answers every question with `answer` and records the step request. */
+function stubJev(
+  answer: unknown,
+  sources: readonly { provider: string; model: string }[] = [{ provider: "stub", model: "stub" }],
+) {
   const bodies: Record<string, unknown>[] = [];
-  const fetch = (async (_url: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body)) as { questions: Record<string, unknown> };
-    bodies.push(body);
-    const answers = Object.fromEntries(Object.keys(body.questions).map((id) => [id, answer]));
-    return new Response(JSON.stringify({ model: "jev-test", answers }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  }) as unknown as EvaluateDeps["fetch"];
-  return { bodies, judge: jev({ apiKey: "test-key", deps: stubDeps(fetch) }) };
+  const seen: { provider: string; model: string }[][] = [];
+  const invokeStep: StepInvoker = async (request) => {
+    const input = request.input as { questions: Record<string, unknown> };
+    bodies.push(input);
+    seen.push(request.agent.inference.sources.map((source) => ({ ...source })));
+    const decisions = Object.keys(input.questions).map((id) => ({ id, ...(answer as object) }));
+    return { output: { decisions } };
+  };
+  return {
+    bodies,
+    seen,
+    judge: judgeModel({ model: step({ agent: judgeAgent(sources) }), invokeStep }),
+  };
 }
 
 async function judged(check: Scorer<string, string, string>, judge: Judge) {
@@ -101,16 +106,20 @@ describe("sentence checks", () => {
     });
   });
 
-  test("transport failure fails closed", async () => {
-    const failing = (async () => {
+  test("a thrown invoke fails closed", async () => {
+    const failing: StepInvoker = async () => {
       throw new TypeError("boom");
-    }) as unknown as EvaluateDeps["fetch"];
+    };
     const { outcome } = await judged(
       question,
-      jev({ apiKey: "test-key", deps: stubDeps(failing) }),
+      judgeModel({
+        model: step({ agent: judgeAgent([{ provider: "stub", model: "stub" }]) }),
+        invokeStep: failing,
+      }),
     );
     expect(outcome).toMatchObject({ pass: false, value: 0 });
     expect(outcome?.explanation).toContain("jev fallback");
+    expect(outcome?.explanation).toContain("boom");
   });
 });
 
@@ -138,10 +147,10 @@ describe("batching", () => {
     });
   });
 
-  test("a transport failure fails every Jev check in the batch", async () => {
-    const failing = (async () => {
+  test("a thrown invoke fails every Jev check in the batch", async () => {
+    const failing: StepInvoker = async () => {
       throw new TypeError("boom");
-    }) as unknown as EvaluateDeps["fetch"];
+    };
     let report: Report;
     try {
       await runEvaluation({
@@ -149,7 +158,10 @@ describe("batching", () => {
         task: (input: string) => input,
         data: [{ input: "a" }],
         scorers: { ready: "Ready to send?", polite: "Is the tone polite?" },
-        judge: jev({ apiKey: "test-key", deps: stubDeps(failing) }),
+        judge: judgeModel({
+          model: step({ agent: judgeAgent([{ provider: "stub", model: "stub" }]) }),
+          invokeStep: failing,
+        }),
       });
       throw new Error("expected failure");
     } catch (cause) {
@@ -180,24 +192,21 @@ describe("thresholds", () => {
   const question = "Is this reply ready to send to the customer?";
   const noul = (p: number) => ({ type: "noul", noul: p });
 
-  function flatFetch(answer: unknown) {
-    return (async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(String(init.body)) as { questions: Record<string, unknown> };
-      const answers = Object.fromEntries(Object.keys(body.questions).map((id) => [id, answer]));
-      return new Response(JSON.stringify({ model: "jev-test", answers }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }) as unknown as EvaluateDeps["fetch"];
+  function answering(answer: unknown): StepInvoker {
+    return async (request) => {
+      const questions = (request.input as { questions: Record<string, unknown> }).questions;
+      const decisions = Object.keys(questions).map((id) => ({ id, ...(answer as object) }));
+      return { output: { decisions } };
+    };
   }
 
   test("judge thresholds retune every check's bars", async () => {
     const { judge } = stubJev(noul(0.75));
     expect((await judged(question, judge)).outcome?.pass).toBe(true);
-    const strict = jev({
-      apiKey: "test-key",
+    const strict = judgeModel({
+      model: step({ agent: judgeAgent([{ provider: "stub", model: "stub" }]) }),
       thresholds: { yes: 0.8 },
-      deps: stubDeps(flatFetch(noul(0.75))),
+      invokeStep: answering(noul(0.75)),
     });
     expect((await judged(question, strict)).outcome).toMatchObject({
       pass: false,
@@ -543,5 +552,105 @@ describe("stored reports", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("judgeModel", () => {
+  const agent = judgeAgent([{ provider: "stub", model: "stub" }]);
+  const invokeStep: StepInvoker = async () => ({ output: { decisions: [] } });
+
+  test("swapping inference sources does not change the judge payload", async () => {
+    const alpha = [{ provider: "alpha", model: "m1" }];
+    const beta = [{ provider: "beta", model: "m2" }];
+    const a = stubJev({ type: "noul", noul: 0.9 }, alpha);
+    const b = stubJev({ type: "noul", noul: 0.9 }, beta);
+    const question = "Is this reply ready to send to the customer?";
+    await judged(question, a.judge);
+    await judged(question, b.judge);
+    expect(a.bodies).toHaveLength(1);
+    expect(a.bodies[0]).toEqual(b.bodies[0]);
+    expect(a.seen[0]).toEqual(alpha);
+    expect(b.seen[0]).toEqual(beta);
+    expect(a.seen[0]).not.toEqual(b.seen[0]);
+  });
+
+  test("string and ask checks throw before cases without judge.invoke", async () => {
+    await expect(
+      runEvaluation({
+        name: "missing-judge",
+        task: (input: string) => input,
+        data: "/no/such/cases.jsonl",
+        scorers: { ready: "Ready?" },
+      }),
+    ).rejects.toThrow("judge.invoke");
+    await expect(
+      runEvaluation({
+        name: "thresholds-only",
+        task: (input: string) => input,
+        data: "/no/such/cases.jsonl",
+        scorers: { ready: ask("Ready?", { options: { a: "a" }, pass: "a" }) },
+        judge: jev({ thresholds: { yes: 0.9 } }),
+      }),
+    ).rejects.toThrow("judge.invoke");
+    const report = await runEvaluation({
+      name: "code-only",
+      task: (input: string) => input,
+      data: [{ input: "a", expectedOutput: "a" }],
+    });
+    expect(report.ok).toBe(true);
+  });
+
+  test("rejects a model that is not one plain step", () => {
+    expect(() => judgeModel({ model: step({ agent, triggers: 2 }), invokeStep })).toThrow(
+      "triggers must be 1",
+    );
+    expect(() =>
+      judgeModel({
+        model: step({ agent, input: { from: "trigger.payload" } }),
+        invokeStep,
+      }),
+    ).toThrow("must not set input");
+    expect(() =>
+      judgeModel({
+        model: step({ agent, inference: { literal: null } }),
+        invokeStep,
+      }),
+    ).toThrow("must not set inference");
+    const two = defineWorkflow({
+      id: "two",
+      trigger: { type: "manual" },
+      steps: {
+        a: step({ agent }),
+        b: step({ agent, after: ["a"] }),
+      },
+    });
+    expect(() => judgeModel({ model: two, invokeStep })).toThrow("exactly one step");
+    const empty = {
+      id: "empty",
+      triggers: [{ type: "manual" }],
+      steps: {},
+      stepOrder: [],
+    } as WorkflowDefinition;
+    expect(() => judgeModel({ model: empty, invokeStep })).toThrow("no steps");
+    const gated = {
+      id: "gated",
+      triggers: [{ type: "manual" }],
+      steps: { g: { id: "g", kind: "gate" } },
+      stepOrder: ["g"],
+    } as unknown as WorkflowDefinition;
+    expect(() => judgeModel({ model: gated, invokeStep })).toThrow("must be a step");
+    const twoTriggers = {
+      id: "twice",
+      triggers: [{ type: "manual" }, { type: "manual" }],
+      steps: { only: { id: "only", kind: "step", agent } },
+      stepOrder: ["only"],
+    } as unknown as WorkflowDefinition;
+    expect(() => judgeModel({ model: twoTriggers, invokeStep })).toThrow("exactly one trigger");
+    expect(() =>
+      judgeModel({
+        model: step({ agent }),
+        invokeStep: undefined as unknown as StepInvoker,
+      }),
+    ).toThrow("needs invokeStep");
   });
 });

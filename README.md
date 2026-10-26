@@ -69,20 +69,22 @@ A check that throws, hangs past `timeout`, or returns anything else fails
 itself closed; its siblings still run. Jev transport failures fail closed.
 
 Jev sees `{ input, output, expectedOutput, steps }`, and a case's string and
-`ask` checks answer in one call. Configure it with
-`judge: jev({ endpoint, model, apiKey, timeout })`; `endpoint` is
-`"official"` (default), `"gateway"` or a URL. Without an `apiKey` the
-key comes from the environment as `@corbits/system-one` reads it.
+`ask` checks answer in one call. The model is not configured on `jev()`.
+Build it with `judgeModel({ model, invokeStep, thresholds, escalate, timeout })`
+from `@corbits/evals/workflow`. `model` is one workflow step (or a one-step
+workflow). `invokeStep` runs that step; its input is `{ state, questions }`
+and its output is `{ decisions }` or `{ fallback: true, reason }`.
+`jev({ thresholds, escalate })` only sets bars and an escalation agent.
 
 Thresholds: a yes/no check passes at p(yes) >= `yes` and fails at
 p(yes) <= `no` (0.7 / 0.3); `ask` fails as unsure when its top
 probability is under `sure` (0.6). Retune them per judge with
-`jev({ thresholds: { yes, no, sure } })` or per check as above.
-Thresholds are tuned to a judge version, so pin `model` — e.g.
-`jev({ model: "jev-1.13.0" })` — when they must stay stable.
+`judgeModel({ thresholds: { yes, no, sure }, ... })` or per check as above.
+Thresholds are tuned to a judge version, so pin the step agent's model
+when they must stay stable.
 
 Escalation: `sure` doubles as the escalation gate. Give the judge an
-agent — `jev({ escalate: agent })`, anything with
+agent — `escalate` on `jev` or `judgeModel`, anything with
 `send(prompt)` returning `{ type: "reply", reply }` or
 `{ type: "suspended" }`, e.g. an `@intx/agent` agent from a `@corbits/*`
 adapter — and every unsure decision is re-asked with the exact answer
@@ -104,7 +106,8 @@ space cannot absorb — those fail closed by design.
   definition is refused. Each step lands in `r.steps`. `output` picks the
   result from the finished run (default: the last listed step's output),
   `trigger` maps the input to the trigger payload. Without them, type the
-  run as `workflow<I, O>(...)`.
+  run as `workflow<I, O>(...)`. The same entry exports `judgeModel` for
+  string and `ask` scorers. A code-only eval needs no judge.
 
 `repeats` runs each case several times; a check passes only if every
 attempt passes. `concurrency` (default 4) bounds cases in flight;
