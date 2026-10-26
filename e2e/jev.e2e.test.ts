@@ -16,7 +16,7 @@ import {
   ask,
   EvalFailure,
   runEvaluation,
-  jev,
+  systemOne,
   type Scorer,
   type Escalation,
   type Judge,
@@ -253,8 +253,8 @@ describe("thresholds", () => {
   });
 
   test("bad thresholds throw at definition", async () => {
-    expect(() => jev({ thresholds: { yes: 0.3, no: 0.5 } })).toThrow("must not exceed");
-    expect(() => jev({ thresholds: { sure: 1.5 } })).toThrow("[0, 1]");
+    expect(() => systemOne({ thresholds: { yes: 0.3, no: 0.5 } })).toThrow("must not exceed");
+    expect(() => systemOne({ thresholds: { sure: 1.5 } })).toThrow("[0, 1]");
     expect(() => ask("Ready?", { options: { a: "a" }, pass: "a", sure: 0 })).toThrow("(0, 1]");
     const { judge } = stubJev(noul(0.9));
     await expect(judged({ question, yes: 0.2, no: 0.5 }, judge)).rejects.toThrow(
@@ -596,7 +596,7 @@ describe("judgeModel", () => {
         task: (input: string) => input,
         data: "/no/such/cases.jsonl",
         scorers: { ready: ask("Ready?", { options: { a: "a" }, pass: "a" }) },
-        judge: jev({ thresholds: { yes: 0.9 } }),
+        judge: systemOne({ thresholds: { yes: 0.9 } }),
       }),
     ).rejects.toThrow("judge.invoke");
     const report = await runEvaluation({

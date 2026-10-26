@@ -10,7 +10,7 @@ import {
 } from "@intx/workflow";
 
 import { TRACE, type Traced } from "./runs.js";
-import { jev, type Escalation, type Judge, type Thresholds } from "./jev.js";
+import { systemOne, type Escalation, type Judge, type Thresholds } from "./jev.js";
 import { toMs, type Duration } from "./timeout.js";
 import type { Step } from "./types.js";
 
@@ -165,7 +165,7 @@ export function judgeModel(options: JudgeModelOptions): Judge {
     trigger: { type: "manual" },
     steps: { judge: forced },
   });
-  const base = jev({
+  const base = systemOne({
     ...(options.thresholds === undefined ? {} : { thresholds: options.thresholds }),
     ...(options.escalate === undefined ? {} : { escalate: options.escalate }),
   });
