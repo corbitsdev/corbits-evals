@@ -27,6 +27,32 @@ export function toOutcome(name: string, raw: unknown): Outcome {
   };
 }
 
+/** Case-insensitive substring. Value is 1 or 0. Strings only; no coercion. */
+export function includes(): CheckFn<unknown, unknown, unknown> {
+  return ({ output, expectedOutput }) => {
+    if (typeof output !== "string" || typeof expectedOutput !== "string") {
+      return {
+        pass: false,
+        value: 0,
+        explanation: "includes needs string output and expectedOutput",
+      };
+    }
+    const needle = collapsed(expectedOutput);
+    if (needle.length === 0) {
+      return { pass: false, value: 0, explanation: "includes needle is empty" };
+    }
+    const pass = collapsed(output).includes(needle);
+    return pass
+      ? { pass: true, value: 1 }
+      : { pass: false, value: 0, explanation: "output does not include the expected text" };
+  };
+}
+
+/** NFKC, trim, collapse internal whitespace, then lowercase. */
+function collapsed(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 /** Output deep-equals expectedOutput, or one field of each (a key or an accessor). */
 export function matches<T = unknown>(
   field?: string | ((value: T) => unknown),

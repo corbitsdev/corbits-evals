@@ -47,18 +47,19 @@ returned.
   `unsure (p=…)` in between. `{ question, yes, no }` sets its own bars.
 - **Helpers**:
 
-| helper                        | passes when                                                                    |
-| ----------------------------- | ------------------------------------------------------------------------------ |
-| `matches(field?)`             | output deep-equals expectedOutput, or the same field (key or accessor) of each |
-| `fitsSchema(schema)`          | output satisfies a Standard Schema (arktype, zod, valibot)                     |
-| `mentions(words)`             | output contains every word, case-insensitive; value is the fraction found      |
-| `avoids(words)`               | output contains none of the words                                              |
-| `ranSteps(names)`             | `tool` and `step` names match `names`, order ignored; value is their F1        |
-| `stepsAtMost(n)`              | the run took at most `n` steps                                                 |
-| `under({ ms })`               | the run finished within `ms`                                                   |
-| `ask(q, { options, pass })`   | Jev picks an option named in `pass`                                            |
-| `ask(q, { options, passAt })` | Jev picks an option; its credit (0..1) is the value and passes at `passAt`     |
-| `ask(q, { levels, pass })`    | Jev grades at level `pass` or above (levels lowest first)                      |
+| helper                        | passes when                                                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `matches(field?)`             | output deep-equals expectedOutput, or the same field (key or accessor) of each                              |
+| `includes()`                  | both strings, and output contains expectedOutput after NFKC, trim, and whitespace collapse; value is 1 or 0 |
+| `fitsSchema(schema)`          | output satisfies a Standard Schema (arktype, zod, valibot)                                                  |
+| `mentions(words)`             | output contains every word, case-insensitive; value is the fraction found                                   |
+| `avoids(words)`               | output contains none of the words                                                                           |
+| `ranSteps(names)`             | `tool` and `step` names match `names`, order ignored; value is their F1                                     |
+| `stepsAtMost(n)`              | the run took at most `n` steps                                                                              |
+| `under({ ms })`               | the run finished within `ms`                                                                                |
+| `ask(q, { options, pass })`   | Jev picks an option named in `pass`                                                                         |
+| `ask(q, { options, passAt })` | Jev picks an option; its credit (0..1) is the value and passes at `passAt`                                  |
+| `ask(q, { levels, pass })`    | Jev grades at level `pass` or above (levels lowest first)                                                   |
 
 `mentions` and `avoids` also take `(r) => words` for per-case words.
 `mentions` and `ranSteps` take `{ atLeast }` to pass on partial credit.

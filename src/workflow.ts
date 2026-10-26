@@ -201,3 +201,14 @@ export function judgeModel(options: JudgeModelOptions): Judge {
     },
   };
 }
+
+export {
+  answerRelevancy,
+  correctness,
+  faithfulness,
+  parsePrebuilt,
+  trajectoryAccuracy,
+  type ModelSource,
+  type Prebuilt,
+  type PrebuiltId,
+} from "./prebuilt.js";
