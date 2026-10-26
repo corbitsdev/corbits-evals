@@ -19,6 +19,9 @@
     "type": "git",
     "url": "git+https://github.com/corbitsdev/corbits-evals.git"
   },
+  "bin": {
+    "corbits-eval": "./dist/cli/index.js"
+  },
   "files": [
     "dist",
     "README.md",
@@ -51,7 +54,8 @@
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run test && bun run test:e2e"
   },
   "dependencies": {
-    "@corbits/system-one": "^0.3.0"
+    "@corbits/system-one": "^0.3.0",
+    "incur": "^0.7.1"
   },
   "devDependencies": {
     "@intx/agent": "^0.5.0",
@@ -72,6 +76,7 @@
     }
   },
   "engines": {
-    "bun": ">=1.2.0"
+    "bun": ">=1.2.0",
+    "node": ">=22"
   }
 }
