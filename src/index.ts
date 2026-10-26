@@ -13,6 +13,7 @@ export type {
 export {
   avoids,
   fitsSchema,
+  includes,
   matches,
   mentions,
   ranSteps,
