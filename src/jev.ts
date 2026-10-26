@@ -29,7 +29,7 @@ export type Judge = {
   readonly thresholds?: Resolved;
   readonly escalate?: Escalation;
   /**
-   * One call per case attempt. `judgeModel` sets this; `jev()` alone does not,
+   * One call per case attempt. `judgeModel` sets this; `systemOne()` alone does not,
    * so it is not a model.
    * Resolves to `{ decisions }` or `{ fallback: true, reason, detail? }`.
    */
@@ -63,7 +63,8 @@ function resolve(label: string, raw: Thresholds): Resolved {
   return out;
 }
 
-export function jev(options: JevOptions = {}): Judge {
+/** Thresholds and an optional escalation agent. Not a model and not an HTTP client. */
+export function systemOne(options: JevOptions = {}): Judge {
   const thresholds =
     options.thresholds === undefined ? undefined : resolve("thresholds", options.thresholds);
   return {
@@ -71,6 +72,9 @@ export function jev(options: JevOptions = {}): Judge {
     ...(options.escalate === undefined ? {} : { escalate: options.escalate }),
   };
 }
+
+/** Same function as `systemOne`. */
+export { systemOne as jev };
 
 /** A Jev question with named answers. A plain string check is the yes/no case. */
 export type Ask = {
