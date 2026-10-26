@@ -5,7 +5,7 @@
     "": {
       "name": "@corbits/evals",
       "dependencies": {
-        "@corbits/system-one": "^0.3.0",
+        "@corbits/system-one": "^0.3.2",
       },
       "devDependencies": {
         "@intx/agent": "^0.5.0",
@@ -30,7 +30,7 @@
 
     "@ark/util": ["@ark/util@0.56.2", "", {}, "sha512-9kU2sUE38FZEGG7l3hamYMBieLYEJh2L1mrYD2eXpT+78EnQSV1bhjxJhnxGBMSTbtwpBSDNSK+K60WvaI/DTQ=="],
 
-    "@corbits/system-one": ["@corbits/system-one@0.3.0", "", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": "^0.4.0", "@intx/types": "^0.4.0" } }, "sha512-rH1MSTyTph1O3wRjVuh2gbunfPLXK0HFDjOym9CkXtcDpRa6J+sWiDsnHdIla3KnVxPWQ2dTbYYck6KlTghtIw=="],
+    "@corbits/system-one": ["@corbits/system-one@0.3.2", "", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": "^0.5.0", "@intx/types": "^0.5.0" } }, "sha512-ugVh+UWMMkogFxHGTl6HnhraLwlGPi+ng1/3vXsaQe84BZ1DlD6WVO59lqrVXqtOmi9CVY/sYDqqf2quaJcUHA=="],
 
     "@intx/agent": ["@intx/agent@0.5.0", "", { "dependencies": { "@intx/inference": "0.5.0", "@intx/log": "0.5.0", "@intx/mime": "0.5.0", "@intx/types": "0.5.0", "arktype": "^2.1.29" } }, "sha512-EWkRfduYJii67goq0cdO6qgRtV0aLe2jGk2aZJhurOivluy3tx0SlhiO2YaQmA4du+qBNzlMV9MMfKkmQ/zs+Q=="],
 
@@ -149,11 +149,5 @@
     "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
-    "@corbits/system-one/@intx/inference": ["@intx/inference@0.4.0", "", { "dependencies": { "@intx/log": "0.4.0", "@intx/types": "0.4.0", "arktype": "^2.1.29" } }, "sha512-cuaqCqotmjg0OzGUm8QmFJr1xX5wPVS0LeuhrxHsj0X3ImoCzVB4e/ttTc+DaP3K1tTMQ/8Q8HHCAPX36mOecQ=="],
-
-    "@corbits/system-one/@intx/inference/@intx/log": ["@intx/log@0.4.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-f1IPZ/9YpEqlA0I2UZPOlRJOTDoOFEZRwZoUVuw8DpgR1WatOMm4hA0E8o6Mtz+pA0ux7gVdls4y/JZcgypsfQ=="],
-
-    "@corbits/system-one/@intx/inference/@intx/types": ["@intx/types@0.4.0", "", { "dependencies": { "arktype": "^2.1.29", "semver": "^7.7.2" } }, "sha512-nJ2fcmskMOZNMRfbHs5ueKpCANHNttoL+sZgIoFaVUF/QLpFWfVp0YV72CQAaa9bVv9j5kRSwtSOCCGSlwQ6Dw=="],
   }
 }
