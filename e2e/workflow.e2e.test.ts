@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { defineAgent } from "@intx/agent";
 import { defineWorkflow, step, type StepInvoker } from "@intx/workflow";
 
-import { EvalFailure, evaluate, matches, ranSteps, under } from "../src/index.js";
+import { EvalFailure, runEvaluation, matches, ranSteps, under } from "../src/index.js";
 import { workflow } from "../src/workflow.js";
 
 function agent(id: string) {
@@ -36,10 +36,11 @@ const invokeStep: StepInvoker = async ({ agent: a, input }) => {
 
 describe("workflow runs", () => {
   test("output defaults to the last step and every step is recorded", async () => {
-    const report = await evaluate("workflow", {
-      run: workflow<string, string>(pipeline, { invokeStep }),
-      cases: [{ input: "refund me", expect: "DRAFT: REFUND ME" }],
-      checks: {
+    const report = await runEvaluation({
+      name: "workflow",
+      task: workflow<string, string>(pipeline, { invokeStep }),
+      data: [{ input: "refund me", expectedOutput: "DRAFT: REFUND ME" }],
+      scorers: {
         exact: matches(),
         order: (r) => r.steps.map((s) => s.name).join(">") === "drafter>reviewer",
         steps: ranSteps(["drafter", "reviewer"]),
@@ -59,14 +60,18 @@ describe("workflow runs", () => {
   });
 
   test("output and trigger pick object values", async () => {
-    const report = await evaluate("workflow-object", {
-      run: workflow(pipeline, {
+    const report = await runEvaluation({
+      name: "workflow-object",
+      task: workflow(pipeline, {
         invokeStep,
         trigger: (input: { order: number }) => `order ${input.order}`,
         output: (run) => ({ draft: run.outputs["draft"], review: run.outputs["review"] }),
       }),
-      cases: [
-        { input: { order: 42 }, expect: { draft: "draft: order 42", review: "DRAFT: ORDER 42" } },
+      data: [
+        {
+          input: { order: 42 },
+          expectedOutput: { draft: "draft: order 42", review: "DRAFT: ORDER 42" },
+        },
       ],
     });
     expect(report.ok).toBe(true);
@@ -74,14 +79,15 @@ describe("workflow runs", () => {
 
   test("a failing step fails the case closed", async () => {
     try {
-      await evaluate("workflow-fail", {
-        run: workflow(pipeline, {
+      await runEvaluation({
+        name: "workflow-fail",
+        task: workflow(pipeline, {
           invokeStep: async ({ agent: a }) => {
             if (a.id === "reviewer") throw new Error("reviewer down");
             return { output: "draft" };
           },
         }),
-        cases: [{ input: "x", expect: "X" }],
+        data: [{ input: "x", expectedOutput: "X" }],
       });
       throw new Error("expected a failure");
     } catch (cause) {

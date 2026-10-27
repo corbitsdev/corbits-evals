@@ -1,29 +1,12 @@
-import {
-  evaluate,
-  type Decision,
-  type EndpointConfig,
-  type EvaluateConfig,
-  type EvaluateDeps,
-  type Question,
-} from "@corbits/system-one";
+import type { Decision, Question } from "@corbits/system-one";
 
-import { toMs, type Duration } from "./timeout.js";
 import type { Outcome, Run } from "./types.js";
 
 export type JevOptions = {
-  /** "official" (default), "gateway", or the URL of a custom endpoint. */
-  endpoint?: string;
-  model?: string;
-  /** Defaults to the endpoint's environment key, as `@corbits/system-one` reads it. */
-  apiKey?: string;
-  /** Bounds one Jev call. `@corbits/system-one` defaults to 1500ms. */
-  timeout?: Duration;
   /** Pass bars for every Jev check through this judge. */
   thresholds?: Thresholds;
   /** Consulted when a decision lands unsure. `sure` doubles as the escalation gate. */
   escalate?: Escalation;
-  /** Replaces `fetch` and the scheduler, e.g. to stub Jev in tests. */
-  deps?: EvaluateDeps;
 };
 
 /** Yes/no passes at p >= `yes` and fails at p <= `no`; `ask` is unsure under `sure`. */
@@ -34,11 +17,23 @@ export type Resolved = { yes: number; no: number; sure: number };
 /** The one documented set of numbers, tuned per workload with `calibrate`. */
 export const DEFAULTS: Resolved = { yes: 0.7, no: 0.3, sure: 0.6 };
 
+/** What one judge call sends. Questions are id-keyed; boolean checks are `noul`. */
+export type JudgePayload = {
+  readonly state: Record<string, unknown>;
+  readonly questions: Readonly<
+    Record<string, { type: string; instructions: Question["instructions"]; criteria?: unknown }>
+  >;
+};
+
 export type Judge = {
-  readonly config: EvaluateConfig;
   readonly thresholds?: Resolved;
   readonly escalate?: Escalation;
-  readonly deps?: EvaluateDeps;
+  /**
+   * One call per case attempt. `judgeModel` sets this; `systemOne()` alone does not,
+   * so it is not a model.
+   * Resolves to `{ decisions }` or `{ fallback: true, reason, detail? }`.
+   */
+  readonly invoke?: (payload: JudgePayload) => Promise<unknown>;
 };
 
 /**
@@ -68,29 +63,18 @@ function resolve(label: string, raw: Thresholds): Resolved {
   return out;
 }
 
-function toEndpoint(endpoint?: string, model?: string): EndpointConfig | undefined {
-  const named = model === undefined ? {} : { model };
-  if (endpoint === undefined)
-    return model === undefined ? undefined : { kind: "official", ...named };
-  if (endpoint === "official" || endpoint === "gateway") return { kind: endpoint, ...named };
-  return { kind: "custom", url: endpoint, ...named };
-}
-
-export function jev(options: JevOptions = {}): Judge {
-  const config: EvaluateConfig = {};
-  const endpoint = toEndpoint(options.endpoint, options.model);
-  if (endpoint !== undefined) config.endpoint = endpoint;
-  if (options.apiKey !== undefined) config.apiKey = options.apiKey;
-  if (options.timeout !== undefined) config.timeoutMs = toMs(options.timeout, "jev timeout");
+/** Thresholds and an optional escalation agent. Not a model and not an HTTP client. */
+export function systemOne(options: JevOptions = {}): Judge {
   const thresholds =
     options.thresholds === undefined ? undefined : resolve("thresholds", options.thresholds);
   return {
-    config,
     ...(thresholds === undefined ? {} : { thresholds }),
     ...(options.escalate === undefined ? {} : { escalate: options.escalate }),
-    ...(options.deps === undefined ? {} : { deps: options.deps }),
   };
 }
+
+/** Same function as `systemOne`. */
+export { systemOne as jev };
 
 /** A Jev question with named answers. A plain string check is the yes/no case. */
 export type Ask = {
@@ -256,7 +240,10 @@ export function checkThresholds(check: Ask | Sentence | string): void {
 }
 
 /** The decision's full distribution; the answer never carries it alone. */
-function dist(decision: Decision): { probabilities: Record<string, number>; confidence?: number } {
+function dist(decision: Exclude<Decision, { type: "box" }>): {
+  probabilities: Record<string, number>;
+  confidence?: number;
+} {
   if (decision.type === "noul") {
     const yes = r3(decision.noul);
     return { probabilities: { yes, no: r3(1 - decision.noul) } };
@@ -273,6 +260,8 @@ export function toOutcome(
   decision: Decision,
   judge: Judge,
 ): Outcome {
+  // A box locates a region. It has no distribution and is not a yes/no, choice, or score.
+  if (decision.type === "box") return failed("jev returned a box decision");
   const t = thresholdsFor(check, judge);
   const d = dist(decision);
   if (decision.type === "noul") {
@@ -328,9 +317,62 @@ export function toOutcome(
 
 function toState(run: Run): Record<string, unknown> {
   const state: Record<string, unknown> = { input: run.input, output: run.output };
-  if (run.expect !== undefined) state["expect"] = run.expect;
+  if (run.expectedOutput !== undefined) state["expectedOutput"] = run.expectedOutput;
   if (run.steps.length > 0) state["steps"] = run.steps;
   return state;
+}
+
+function wireQuestions(questions: readonly Question[]): JudgePayload["questions"] {
+  const wire: Record<
+    string,
+    { type: string; instructions: Question["instructions"]; criteria?: unknown }
+  > = {};
+  for (const question of questions) {
+    const mapped: { type: string; instructions: Question["instructions"]; criteria?: unknown } = {
+      type: question.type === "boolean" ? "noul" : question.type,
+      instructions: question.instructions,
+    };
+    if ("criteria" in question && question.criteria !== undefined)
+      mapped.criteria = question.criteria;
+    wire[question.id] = mapped;
+  }
+  return wire;
+}
+
+type JudgeReply = { fallback: true; reason: string; detail?: string } | { decisions: Decision[] };
+
+function readReply(out: unknown): JudgeReply | undefined {
+  if (typeof out !== "object" || out === null) return undefined;
+  const record = out as Record<string, unknown>;
+  if (record["fallback"] === true) {
+    const reason = typeof record["reason"] === "string" ? record["reason"] : "parse-error";
+    const detail = typeof record["detail"] === "string" ? record["detail"] : undefined;
+    return { fallback: true, reason, ...(detail === undefined ? {} : { detail }) };
+  }
+  if (Array.isArray(record["decisions"])) return { decisions: record["decisions"] as Decision[] };
+  return undefined;
+}
+
+/** Fail closed: a thrown invoke is a transport fallback, same as a typed one. */
+async function callJudge(judge: Judge, questions: Question[], run: Run): Promise<JudgeReply> {
+  if (judge.invoke === undefined) throw new Error("jev: judge has no invoke");
+  let out: unknown;
+  try {
+    out = await judge.invoke({ state: toState(run), questions: wireQuestions(questions) });
+  } catch (cause) {
+    return {
+      fallback: true,
+      reason: "network",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    };
+  }
+  return (
+    readReply(out) ?? {
+      fallback: true,
+      reason: "parse-error",
+      detail: "judge output was not decisions or a fallback",
+    }
+  );
 }
 
 /**
@@ -346,16 +388,13 @@ export async function askJevBatch(
 ): Promise<Record<string, Outcome>> {
   const names = Object.keys(checks);
   const questions = names.map((id) => toQuestion(id, checks[id] as Ask | Sentence | string));
-  let out;
+  let out: JudgeReply;
   try {
-    out = await evaluate(
-      { state: toState(run), questions, config: judge.config },
-      judge.deps === undefined ? undefined : { deps: judge.deps },
-    );
+    out = await callJudge(judge, questions, run);
   } catch (cause) {
     return failedAll(names, `jev threw: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
-  if (out.fallback) {
+  if ("fallback" in out) {
     return failedAll(names, `jev fallback (${out.reason}): ${out.detail ?? "no detail"}`);
   }
   const decisions = new Map(out.decisions.map((decision) => [decision.id, decision]));
@@ -387,15 +426,13 @@ export async function decideBatch(
   run: Run,
 ): Promise<Record<string, Decision>> {
   const names = Object.keys(checks);
-  const out = await evaluate(
-    {
-      state: toState(run),
-      questions: names.map((id) => toQuestion(id, checks[id] as Ask | Sentence | string)),
-      config: judge.config,
-    },
-    judge.deps === undefined ? undefined : { deps: judge.deps },
+  const out = await callJudge(
+    judge,
+    names.map((id) => toQuestion(id, checks[id] as Ask | Sentence | string)),
+    run,
   );
-  if (out.fallback) throw new Error(`jev fallback (${out.reason}): ${out.detail ?? "no detail"}`);
+  if ("fallback" in out)
+    throw new Error(`jev fallback (${out.reason}): ${out.detail ?? "no detail"}`);
   return Object.fromEntries(out.decisions.map((decision) => [decision.id, decision]));
 }
 

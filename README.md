@@ -14,12 +14,13 @@ Bun only (>=1.2.0).
 ## Example
 
 ```ts
-import { evaluate, mentions, under } from "@corbits/evals";
+import { mentions, runEvaluation, under } from "@corbits/evals";
 
-const report = await evaluate("refund-agent", {
-  run: refundAgent, // an @intx/agent Agent, workflow(), or (input) => output
-  cases: [{ name: "duplicate charge", input: "I was charged twice" }],
-  checks: {
+const report = await runEvaluation({
+  name: "refund-agent",
+  task: refundAgent, // an @intx/agent Agent, workflow(), or (input) => output
+  data: [{ name: "duplicate charge", input: "I was charged twice" }],
+  scorers: {
     refunds: mentions(["refund"]),
     readyToSend: "Is this reply ready to send to the customer?",
     fast: under({ ms: 5_000 }),
@@ -33,9 +34,9 @@ console.log(report.markdown());
 
 ## Checks
 
-`checks` maps a name to a check. Without `checks`, one `matches` check
-compares output with `expect`. Every check gets the run
-`r = { input, output, expect, steps, ms }`; `output` is whatever the run
+`scorers` maps a name to a check. Without `scorers`, one `matches` check
+compares output with `expectedOutput`. Every check gets the run
+`r = { input, output, expectedOutput, steps, ms }`; `output` is whatever the run
 returned.
 
 - **Code**: `(r) => boolean | number`, sync or async. A number is 0..1
@@ -46,18 +47,19 @@ returned.
   `unsure (p=…)` in between. `{ question, yes, no }` sets its own bars.
 - **Helpers**:
 
-| helper                        | passes when                                                                |
-| ----------------------------- | -------------------------------------------------------------------------- |
-| `matches(field?)`             | output deep-equals expect, or the same field (key or accessor) of each     |
-| `fitsSchema(schema)`          | output satisfies a Standard Schema (arktype, zod, valibot)                 |
-| `mentions(words)`             | output contains every word, case-insensitive; value is the fraction found  |
-| `avoids(words)`               | output contains none of the words                                          |
-| `ranSteps(names)`             | `tool` and `step` names match `names`, order ignored; value is their F1    |
-| `stepsAtMost(n)`              | the run took at most `n` steps                                             |
-| `under({ ms })`               | the run finished within `ms`                                               |
-| `ask(q, { options, pass })`   | Jev picks an option named in `pass`                                        |
-| `ask(q, { options, passAt })` | Jev picks an option; its credit (0..1) is the value and passes at `passAt` |
-| `ask(q, { levels, pass })`    | Jev grades at level `pass` or above (levels lowest first)                  |
+| helper                        | passes when                                                                                                                                                                                                                             |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `matches(field?)`             | output deep-equals expectedOutput, or the same field (key or accessor) of each                                                                                                                                                          |
+| `includes()`                  | both strings, and output contains expectedOutput after NFKC, trim, and whitespace collapse; value is 1 or 0                                                                                                                             |
+| `fitsSchema(schema)`          | output satisfies a Standard Schema (arktype, zod, valibot)                                                                                                                                                                              |
+| `mentions(words)`             | output contains every word, case-insensitive; value is the fraction found                                                                                                                                                               |
+| `avoids(words)`               | output contains none of the words                                                                                                                                                                                                       |
+| `ranSteps(names)`             | `tool` and `step` names match `names`, order ignored; value is their F1. Agent trajectory comes from `stream()`. `ranSteps([])` fails when `steps` is empty. An observed model-only run (llm steps, no tool or step names) still passes |
+| `stepsAtMost(n)`              | the run took at most `n` steps                                                                                                                                                                                                          |
+| `under({ ms })`               | the run finished within `ms`                                                                                                                                                                                                            |
+| `ask(q, { options, pass })`   | Jev picks an option named in `pass`                                                                                                                                                                                                     |
+| `ask(q, { options, passAt })` | Jev picks an option; its credit (0..1) is the value and passes at `passAt`                                                                                                                                                              |
+| `ask(q, { levels, pass })`    | Jev grades at level `pass` or above (levels lowest first)                                                                                                                                                                               |
 
 `mentions` and `avoids` also take `(r) => words` for per-case words.
 `mentions` and `ranSteps` take `{ atLeast }` to pass on partial credit.
@@ -67,21 +69,24 @@ returned.
 A check that throws, hangs past `timeout`, or returns anything else fails
 itself closed; its siblings still run. Jev transport failures fail closed.
 
-Jev sees `{ input, output, expect, steps }`, and a case's string and
-`ask` checks answer in one call. Configure it with
-`judge: jev({ endpoint, model, apiKey, timeout })`; `endpoint` is
-`"official"` (default), `"gateway"` or a URL. Without an `apiKey` the
-key comes from the environment as `@corbits/system-one` reads it.
+Jev sees `{ input, output, expectedOutput, steps }`, and a case's string and
+`ask` checks answer in one call. The model is not configured on `systemOne()`.
+Build it with `judgeModel({ model, invokeStep, thresholds, escalate, timeout })`
+from `@corbits/evals/workflow`. `model` is one workflow step (or a one-step
+workflow). `invokeStep` runs that step; its input is `{ state, questions }`
+and its output is `{ decisions }` or `{ fallback: true, reason }`.
+`systemOne({ thresholds, escalate })` only sets bars and an escalation agent.
+`jev` is an alias of `systemOne`.
 
 Thresholds: a yes/no check passes at p(yes) >= `yes` and fails at
 p(yes) <= `no` (0.7 / 0.3); `ask` fails as unsure when its top
 probability is under `sure` (0.6). Retune them per judge with
-`jev({ thresholds: { yes, no, sure } })` or per check as above.
-Thresholds are tuned to a judge version, so pin `model` — e.g.
-`jev({ model: "jev-1.13.0" })` — when they must stay stable.
+`judgeModel({ thresholds: { yes, no, sure }, ... })` or per check as above.
+Thresholds are tuned to a judge version, so pin the step agent's model
+when they must stay stable.
 
 Escalation: `sure` doubles as the escalation gate. Give the judge an
-agent — `jev({ escalate: agent })`, anything with
+agent — `escalate` on `systemOne` or `judgeModel`, anything with
 `send(prompt)` returning `{ type: "reply", reply }` or
 `{ type: "suspended" }`, e.g. an `@intx/agent` agent from a `@corbits/*`
 adapter — and every unsure decision is re-asked with the exact answer
@@ -96,14 +101,21 @@ space cannot absorb — those fail closed by design.
 
 - **Function**: `(input, signal) => output`. `signal` aborts on `timeout`.
 - **Agent**: an `@intx/agent` Agent, detected by `send`. Input is sent
-  as a message; output is the reply.
+  as a message; output is the reply. When the agent has `stream()`, steps
+  are recorded from that stream (`inference.done` as `llm`, `tool.start` /
+  `tool.done` as `tool`). A policy deny emits `tool.done` without
+  `tool.start`; the tool is still recorded when `inference.tool_call.end`
+  or the assistant `tool_call` block names it. A reply-only send without
+  `stream` leaves `steps` empty, which fails `ranSteps([])`. An observed
+  model-only run still passes.
 - **Workflow**: `workflow(definition, { invokeStep })` from
   `@corbits/evals/workflow`. A definition cannot run locally without a
   step invoker, and the root never loads `@intx/workflow`, so a bare
   definition is refused. Each step lands in `r.steps`. `output` picks the
   result from the finished run (default: the last listed step's output),
   `trigger` maps the input to the trigger payload. Without them, type the
-  run as `workflow<I, O>(...)`.
+  run as `workflow<I, O>(...)`. The same entry exports `judgeModel` for
+  string and `ask` scorers. A code-only eval needs no judge.
 
 `repeats` runs each case several times; a check passes only if every
 attempt passes. `concurrency` (default 4) bounds cases in flight;
@@ -111,19 +123,21 @@ attempt passes. `concurrency` (default 4) bounds cases in flight;
 
 ## Cases
 
-An array of `{ name?, input, expect?, must?, skip? }`, or the path of a
-JSONL file of the same objects. `name` keys the case in reports and
+An array of `{ name?, input, expectedOutput?, must?, skip? }`, or the path of a
+JSONL file of the same objects. The ground-truth key is `expectedOutput`.
+`expect` and `expected` throw. `name` keys the case in reports and
 compared runs and defaults to the input.
 
 ## Passing
 
 ```ts
-await evaluate("judge", {
-  run,
-  cases, // a case can say { must: ["tests"], skip: ["docs"] }
-  checks,
+await runEvaluation({
+  name: "judge",
+  task: run,
+  data, // a case can say { must: ["tests"], skip: ["docs"] }
+  scorers,
   compare: "evals/judge.last.json", // read: measure drops against it
-  save: "evals/judge.last.json", // write: store this run, pass or fail
+  save: "evals/judge.last.json", // write: store this experiment, pass or fail
   allow: {
     tests: { miss: 1, drop: 0 },
     docs: { miss: 5, drop: 2 },
@@ -141,18 +155,68 @@ Per check, `allow` sets (default 0):
 A case's `must` checks must pass whatever `allow` says; its `skip` checks
 are not run or counted.
 
-`evaluate` prints each check's passes, misses and drops, and rejects with
-`EvalFailure` naming the limit each failing check broke and its failed
+`runEvaluation` prints each scorer's passes, misses and drops, and rejects with
+`EvalFailure` naming the limit each failing scorer broke and its failed
 cases; `.report` holds every result.
 
-A stored run is each case × check pass and value — plus a Jev check's
+An experiment is each case × scorer pass and value — plus a Jev scorer's
 probability distribution and confidence — and `about`, no times.
+Saved files are format 2: `{ format: 2, name, cases }`. Any other `format`,
+including format 1, is rejected.
 `compare` only reads; a missing file skips drops. `save` only writes, on
-every run. One path for both compares with the last run, then replaces
-it. `compare` also takes a report from an earlier `evaluate` of the same
-eval, with no file: `evaluate(name, { ...options, compare: before })`.
+every run. One path for both compares with the last experiment, then replaces
+it. `compare` also takes an experiment from an earlier `runEvaluation` of the same
+evaluation, with no file: `runEvaluation({ ...spec, compare: before.experiment })`.
 Flips print as `fixed` / `broke`, new and gone cases as `added` /
 `removed`. `quiet: true` skips the summary.
+
+## CLI
+
+The package bin is `corbits-eval` (`./dist/cli/index.js`).
+
+```sh
+corbits-eval run ./evals/refund.ts
+corbits-eval run ./evals/refund.ts --format json
+```
+
+The file is an ES module path resolved from the current working directory.
+`corbits-eval` loads the `evaluation` export when it is a spec object, otherwise
+the default export when that is a spec object, otherwise a zero-argument
+function on either of those exports. The function must return a spec. No other
+exports are read.
+
+A spec is the object `runEvaluation` accepts (`name`, `data`, `task`,
+`scorers`, and the rest). Case rows use `expectedOutput`. The CLI calls
+`runEvaluation`; it does not score on its own.
+
+Exit codes:
+
+| code | when                                                                                           |
+| ---- | ---------------------------------------------------------------------------------------------- |
+| 0    | the run passed its gate                                                                        |
+| 1    | the evaluation failed its gate                                                                 |
+| 2    | the file is missing, the import failed, there is no spec export, or the evaluation did not run |
+
+`--format json` (and `--json`) come from incur and print only that result as JSON on stdout, with no human summary. Exit 1 is only a failed gate (`EVAL_FAILED`). Config that stops the run before it starts, such as empty `data` or a string or `ask` scorer with no `judge.invoke`, exits 2.
+
+## Workflow scorers
+
+`@corbits/evals/workflow` also exports four prebuilt one-step judges. Each
+takes a pinned `{ provider, model }` and does not call a model by itself:
+`faithfulness`, `answerRelevancy`, `correctness`, and `trajectoryAccuracy`.
+Each returns `{ definition, payload, failure }`. Run `definition` with
+`workflow`, using `payload(run)` as the trigger. An outcome from `payload`
+is the result; `failure` is the closed miss when the run cannot be judged.
+`parsePrebuilt(id, output)` reads the step's category or score JSON.
+`judgeModel` expects `{ decisions }` or `{ fallback }` and does not run
+these rubrics. `includes` stays
+a code check on the root package.
+
+## Breaking changes
+
+- Saved experiments must be format 2 (`{ format: 2, name, cases }`). Format 1 is rejected.
+- JSONL rows use `expectedOutput`. `expect` and `expected` throw.
+- `ranSteps([])` fails when `steps` is empty. An observed model-only run still passes.
 
 ## Calibrating
 
@@ -163,7 +227,7 @@ verdicts agree, land unsure, or confidently disagree at each threshold:
 ```ts
 const table = await calibrate("refund-agent", {
   run: refundAgent,
-  cases: labeledCases, // { input, expect?, labels: { readyToSend: true } }
+  cases: labeledCases, // { input, expectedOutput?, labels: { readyToSend: true } }
   checks: { readyToSend: "Is this reply ready to send to the customer?" },
   judge,
 });

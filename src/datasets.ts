@@ -21,7 +21,10 @@ function toCase(row: Record<string, unknown>, where: string): Case {
   if (!("input" in row)) throw new Error(`${where}: missing "input"`);
   const evalCase: Case = { input: row["input"] };
   if (name !== undefined) evalCase.name = name;
-  if (row["expect"] !== undefined) evalCase.expect = row["expect"];
+  if (row["expect"] !== undefined || row["expected"] !== undefined) {
+    throw new Error(`${where}: use "expectedOutput", not "expect" or "expected"`);
+  }
+  if (row["expectedOutput"] !== undefined) evalCase.expectedOutput = row["expectedOutput"];
   const must = checkNames(row, "must", where);
   if (must !== undefined) evalCase.must = must;
   const skip = checkNames(row, "skip", where);

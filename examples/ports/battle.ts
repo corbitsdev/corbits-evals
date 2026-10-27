@@ -1,6 +1,6 @@
 // Pairwise beats absolute 1-10 for small judges.
 // Run: bun examples/ports/battle.ts
-import { ask, evaluate } from "../../src/index.js";
+import { ask, runEvaluation } from "../../src/index.js";
 import { localJev } from "../ollama.js";
 
 const QUESTION = "What is the capital of France?";
@@ -21,13 +21,14 @@ const PAIRS: [string, string][] = [
 ];
 
 // Jev sees the case input, so each pair goes in as { question, A, B }.
-const report = await evaluate("port-battle", {
-  run: (pair: { question: string; A: string; B: string }) => pair,
-  cases: PAIRS.map(([a, b]) => ({
+const report = await runEvaluation({
+  name: "port-battle",
+  task: (pair: { question: string; A: string; B: string }) => pair,
+  data: PAIRS.map(([a, b]) => ({
     name: `${a}-vs-${b}`,
     input: { question: QUESTION, A: ANSWERS[a] ?? "", B: ANSWERS[b] ?? "" },
   })),
-  checks: {
+  scorers: {
     battle: ask("Which answer better serves the question? Correctness first, then completeness.", {
       options: {
         A: "answer A is better",

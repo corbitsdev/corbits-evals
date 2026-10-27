@@ -1,6 +1,6 @@
 import type { Decision } from "@corbits/system-one";
 
-import { caseName } from "./evaluate.js";
+import { caseName } from "./evaluation.js";
 import { DEFAULTS, decideBatch, toOutcome, type Ask, type Judge, type Sentence } from "./jev.js";
 import { mapPool, runOnce, type RunSpec } from "./runner.js";
 import { toTraced, type Runnable } from "./runs.js";
@@ -11,7 +11,7 @@ import type { Outcome } from "./types.js";
 export type Labeled<I = unknown, E = unknown> = {
   name?: string;
   input: I;
-  expect?: E;
+  expectedOutput?: E;
   /** The expected verdict per check name. */
   labels: Readonly<Record<string, boolean>>;
 };
@@ -22,7 +22,7 @@ export type CalibrateOptions<I, O, E> = {
   checks: Record<string, Ask | Sentence | string>;
   judge: Judge;
   concurrency?: number;
-  /** Bounds each case run. The Jev call is bounded by `judge.timeout`. */
+  /** Bounds each case run. The judge step is bounded by its own timeout. */
   timeout?: Duration;
 };
 
@@ -115,7 +115,7 @@ export async function calibrate<I, O, E = O>(
     const evalCase = {
       name: key,
       input: labeled.input,
-      ...(labeled.expect === undefined ? {} : { expect: labeled.expect }),
+      ...(labeled.expectedOutput === undefined ? {} : { expectedOutput: labeled.expectedOutput }),
     };
     const runResult = await runOnce(spec, evalCase);
     const decisions = await decideBatch(options.judge, options.checks, runResult);
@@ -140,7 +140,6 @@ export async function calibrate<I, O, E = O>(
     const rows: CalibrationRow[] = [];
     for (const threshold of GRID) {
       const judge: Judge = {
-        config: {},
         thresholds: isQuestion
           ? { yes: base.yes, no: base.no, sure: threshold }
           : { yes: threshold, no: r3(1 - threshold), sure: base.sure },

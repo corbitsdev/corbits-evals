@@ -7,7 +7,7 @@ import { type } from "arktype";
 import {
   avoids,
   EvalFailure,
-  evaluate,
+  runEvaluation,
   fitsSchema,
   matches,
   mentions,
@@ -30,16 +30,17 @@ async function failure(pending: Promise<unknown>): Promise<EvalFailure> {
     if (cause instanceof EvalFailure) return cause;
     throw cause;
   }
-  throw new Error("expected evaluate to fail");
+  throw new Error("expected runEvaluation to fail");
 }
 
 describe("runs", () => {
   test("a function run with the default check", async () => {
-    const report = await evaluate("upper", {
-      run: upper,
-      cases: [
-        { input: "hi", expect: "HI" },
-        { name: "yo", input: "yo", expect: "YO" },
+    const report = await runEvaluation({
+      name: "upper",
+      task: upper,
+      data: [
+        { input: "hi", expectedOutput: "HI" },
+        { name: "yo", input: "yo", expectedOutput: "YO" },
       ],
     });
     expect(report.ok).toBe(true);
@@ -56,15 +57,20 @@ describe("runs", () => {
         return { type: "reply" as const, reply: `re: ${content}` };
       },
     };
-    const report = await evaluate("agent", {
-      run: agent,
-      cases: [{ input: "refund", expect: "re: refund" }],
+    const report = await runEvaluation({
+      name: "agent",
+      task: agent,
+      data: [{ input: "refund", expectedOutput: "re: refund" }],
     });
     expect(report.ok).toBe(true);
     expect(seen[0]).toBeInstanceOf(AbortSignal);
     const suspended = { send: async () => ({ type: "suspended" as const }) };
     const err = await failure(
-      evaluate("agent-suspended", { run: suspended, cases: ["x"].map((input) => ({ input })) }),
+      runEvaluation({
+        name: "agent-suspended",
+        task: suspended,
+        data: ["x"].map((input) => ({ input })),
+      }),
     );
     expect(err.report.cases[0]?.error).toContain('did not reply (got "suspended")');
   });
@@ -72,15 +78,16 @@ describe("runs", () => {
   test("a raw workflow definition is refused with the fix", async () => {
     const definition = { id: "w", triggers: [], steps: {}, stepOrder: [] };
     await expect(
-      evaluate("raw", { run: definition as never, cases: [{ input: "x" }] }),
+      runEvaluation({ name: "raw", task: definition as never, data: [{ input: "x" }] }),
     ).rejects.toThrow("@corbits/evals/workflow");
   });
 
   test("objects stay raw and match deeply", async () => {
-    const report = await evaluate("objects", {
-      run: (input: { amount: number }) => ({ decision: "refund", amount: input.amount }),
-      cases: [{ input: { amount: 5 }, expect: { decision: "refund", amount: 5 } }],
-      checks: {
+    const report = await runEvaluation({
+      name: "objects",
+      task: (input: { amount: number }) => ({ decision: "refund", amount: input.amount }),
+      data: [{ input: { amount: 5 }, expectedOutput: { decision: "refund", amount: 5 } }],
+      scorers: {
         whole: matches(),
         decision: matches("decision"),
         amount: matches((v: { amount: number }) => v.amount),
@@ -95,13 +102,13 @@ describe("runs", () => {
     const path = join(dir, "cases.jsonl");
     await Bun.write(
       path,
-      '{"name":"a","input":"hi","expect":"HI"}\n\n{"input":"yo","expect":"YO"}\n',
+      '{"name":"a","input":"hi","expectedOutput":"HI"}\n\n{"input":"yo","expectedOutput":"YO"}\n',
     );
-    const report = await evaluate("jsonl", { run: upper, cases: path });
+    const report = await runEvaluation({ name: "jsonl", task: upper, data: path });
     expect(report.cases.map((c) => c.name)).toEqual(["a", "yo"]);
     expect(report.passed).toBe(2);
     await Bun.write(path, '{"input":"x"}\n{"name":"b"}\n');
-    await expect(evaluate("jsonl-bad", { run: upper, cases: path })).rejects.toThrow(
+    await expect(runEvaluation({ name: "jsonl-bad", task: upper, data: path })).rejects.toThrow(
       `${path}:2: missing "input"`,
     );
   });
@@ -109,10 +116,11 @@ describe("runs", () => {
 
 describe("checks", () => {
   test("code checks return booleans or 0..1 numbers", async () => {
-    const report = await evaluate("code", {
-      run: upper,
-      cases: [{ input: "hi" }],
-      checks: { short: (r) => r.output.length < 5, half: () => 0.5, slow: async () => true },
+    const report = await runEvaluation({
+      name: "code",
+      task: upper,
+      data: [{ input: "hi" }],
+      scorers: { short: (r) => r.output.length < 5, half: () => 0.5, slow: async () => true },
       allow: { half: 1 },
     });
     const checks = report.cases[0]?.checks;
@@ -131,10 +139,11 @@ describe("checks", () => {
         ],
       }),
     };
-    const report = await evaluate("helpers", {
-      run: steps,
-      cases: [{ input: "order 42" }],
-      checks: {
+    const report = await runEvaluation({
+      name: "helpers",
+      task: steps,
+      data: [{ input: "order 42" }],
+      scorers: {
         mentionsAll: mentions(["refund", "ORDER 42"]),
         mentionsSome: mentions(["refund", "credit"]),
         mentionsHalf: mentions(["refund", "credit"], { atLeast: 0.5 }),
@@ -178,16 +187,19 @@ describe("checks", () => {
   });
 
   test("matches fails a case without expect", async () => {
-    const err = await failure(evaluate("no-expect", { run: upper, cases: [{ input: "hi" }] }));
-    expect(err.report.cases[0]?.checks["matches"]?.explanation).toBe("case has no expect");
+    const err = await failure(
+      runEvaluation({ name: "no-expect", task: upper, data: [{ input: "hi" }] }),
+    );
+    expect(err.report.cases[0]?.checks["matches"]?.explanation).toBe("case has no expectedOutput");
   });
 
   test("a throwing, hanging or malformed check fails itself closed, not its siblings", async () => {
     const err = await failure(
-      evaluate("bad-checks", {
-        run: upper,
-        cases: [{ input: "hi", expect: "HI" }],
-        checks: {
+      runEvaluation({
+        name: "bad-checks",
+        task: upper,
+        data: [{ input: "hi", expectedOutput: "HI" }],
+        scorers: {
           exact: matches(),
           boom: () => {
             throw new Error("kaput");
@@ -209,8 +221,9 @@ describe("checks", () => {
   test("a run error or timeout fails every check and aborts the run", async () => {
     let aborted = false;
     const err = await failure(
-      evaluate("bad-runs", {
-        run: (input: string, signal) => {
+      runEvaluation({
+        name: "bad-runs",
+        task: (input: string, signal) => {
           if (input === "boom") throw new Error("kaput");
           return new Promise<string>((_, reject) => {
             signal.addEventListener("abort", () => {
@@ -219,8 +232,8 @@ describe("checks", () => {
             });
           });
         },
-        cases: [{ input: "boom" }, { input: "hang" }],
-        checks: { fine: () => true },
+        data: [{ input: "boom" }, { input: "hang" }],
+        scorers: { fine: () => true },
         timeout: 30,
       }),
     );
@@ -236,10 +249,11 @@ describe("gates", () => {
   test("repeats fail a check when any attempt fails and report the deciding one", async () => {
     let calls = 0;
     const err = await failure(
-      evaluate("flaky", {
-        run: upper,
-        cases: [{ input: "hi" }],
-        checks: {
+      runEvaluation({
+        name: "flaky",
+        task: upper,
+        data: [{ input: "hi" }],
+        scorers: {
           flaky: () => {
             calls += 1;
             return calls === 1
@@ -259,25 +273,31 @@ describe("gates", () => {
   });
 
   test("bad options are rejected up front", async () => {
-    const base = { run: upper, cases: [{ input: "a", expect: "A" }] };
-    await expect(evaluate("o", { ...base, concurrency: Number.NaN })).rejects.toThrow(
+    const base = { task: upper, data: [{ input: "a", expectedOutput: "A" }] };
+    await expect(runEvaluation({ name: "o", ...base, concurrency: Number.NaN })).rejects.toThrow(
       "concurrency",
     );
-    await expect(evaluate("o", { ...base, repeats: 0 })).rejects.toThrow("repeats");
-    await expect(evaluate("o", { ...base, timeout: "soon" as never })).rejects.toThrow("timeout");
-    await expect(evaluate("o", { ...base, checks: {} })).rejects.toThrow("no checks");
-    await expect(evaluate("o", { ...base, cases: [] })).rejects.toThrow("no cases");
+    await expect(runEvaluation({ name: "o", ...base, repeats: 0 })).rejects.toThrow("repeats");
+    await expect(runEvaluation({ name: "o", ...base, timeout: "soon" as never })).rejects.toThrow(
+      "timeout",
+    );
+    await expect(runEvaluation({ name: "o", ...base, scorers: {} })).rejects.toThrow("no scorers");
+    await expect(runEvaluation({ name: "o", ...base, data: [] })).rejects.toThrow("no data");
     await expect(
-      evaluate("o", { ...base, cases: [...base.cases, { input: "a" }] }),
+      runEvaluation({ name: "o", ...base, data: [...base.data, { input: "a" }] }),
     ).rejects.toThrow('duplicate case "a"');
   });
 
   test("markdown escapes cells", async () => {
     const err = await failure(
-      evaluate("md", { run: upper, cases: [{ name: "a|b\nc", input: "<x>", expect: "no" }] }),
+      runEvaluation({
+        name: "md",
+        task: upper,
+        data: [{ name: "a|b\nc", input: "<x>", expectedOutput: "no" }],
+      }),
     );
     const md = err.report.markdown();
-    expect(md).toContain("# eval: md");
+    expect(md).toContain("# evaluation: md");
     expect(md).toContain("| matches | 0/1 | 1 (0 allowed) | FAIL |");
     expect(md).toContain("| a\\|b c | FAIL");
     expect(md).not.toContain("<X>");
@@ -286,26 +306,40 @@ describe("gates", () => {
 
 describe("passing", () => {
   const cases = [
-    { name: "a", input: "a", expect: "A" },
-    { name: "b", input: "b", expect: "B" },
-    { name: "c", input: "c", expect: "nope" },
+    { name: "a", input: "a", expectedOutput: "A" },
+    { name: "b", input: "b", expectedOutput: "B" },
+    { name: "c", input: "c", expectedOutput: "nope" },
   ];
   const checks = { exact: matches(), short: (r: { output: string }) => r.output.length === 1 };
 
   test("each check may miss as many cases as allowed", async () => {
-    const strict = await failure(evaluate("strict", { run: upper, cases, checks }));
+    const strict = await failure(
+      runEvaluation({ name: "strict", task: upper, data: cases, scorers: checks }),
+    );
     expect(strict.message).toContain("exact: 1 missed, 0 allowed");
     expect(strict.message).toContain('c / exact: expected "nope", got "C"');
     expect(strict.report.checks["exact"]).toMatchObject({ passed: 2, counted: 3, missed: 1 });
     expect(strict.report.checks["short"]?.ok).toBe(true);
 
-    const report = await evaluate("lenient", { run: upper, cases, checks, allow: { exact: 1 } });
+    const report = await runEvaluation({
+      name: "lenient",
+      task: upper,
+      data: cases,
+      scorers: checks,
+      allow: { exact: 1 },
+    });
     expect(report.ok).toBe(true);
     expect(report.checks["exact"]?.allow).toEqual({ miss: 1, drop: 0 });
 
     const long = (input: string) => input.toUpperCase().repeat(2);
     const over = await failure(
-      evaluate("over", { run: long, cases, checks, allow: { exact: { miss: 3 }, short: 2 } }),
+      runEvaluation({
+        name: "over",
+        task: long,
+        data: cases,
+        scorers: checks,
+        allow: { exact: { miss: 3 }, short: 2 },
+      }),
     );
     expect(over.message).toContain("short: 3 missed, 2 allowed");
     expect(over.message).not.toContain("exact:");
@@ -315,10 +349,11 @@ describe("passing", () => {
 
   test("must fails a check despite its allowance; skip leaves a case out", async () => {
     const must = await failure(
-      evaluate("must", {
-        run: upper,
-        cases: cases.map((c) => (c.name === "c" ? { ...c, must: ["exact"] } : c)),
-        checks,
+      runEvaluation({
+        name: "must",
+        task: upper,
+        data: cases.map((c) => (c.name === "c" ? { ...c, must: ["exact"] } : c)),
+        scorers: checks,
         allow: { exact: 1 },
       }),
     );
@@ -326,13 +361,14 @@ describe("passing", () => {
     expect(must.report.checks["exact"]).toMatchObject({ missed: 1, mustFailed: ["c"], ok: false });
 
     const seen: string[] = [];
-    const report = await evaluate("skip", {
-      run: upper,
-      cases: cases.map((c) => (c.name === "c" ? { ...c, skip: ["exact"] } : c)),
-      checks: {
+    const report = await runEvaluation({
+      name: "skip",
+      task: upper,
+      data: cases.map((c) => (c.name === "c" ? { ...c, skip: ["exact"] } : c)),
+      scorers: {
         exact: (r) => {
           seen.push(r.input);
-          return r.output === r.expect;
+          return r.output === r.expectedOutput;
         },
       },
     });
@@ -346,40 +382,46 @@ describe("passing", () => {
     const path = join(await tempDir(), "cases.jsonl");
     await Bun.write(
       path,
-      '{"name":"a","input":"a","expect":"A","must":["exact"]}\n{"name":"c","input":"c","expect":"nope","skip":["exact"]}\n',
+      '{"name":"a","input":"a","expectedOutput":"A","must":["exact"]}\n{"name":"c","input":"c","expectedOutput":"nope","skip":["exact"]}\n',
     );
-    const report = await evaluate("jsonl-must", { run: upper, cases: path, checks });
+    const report = await runEvaluation({
+      name: "jsonl-must",
+      task: upper,
+      data: path,
+      scorers: checks,
+    });
     expect(report.checks["exact"]).toMatchObject({ passed: 1, counted: 1 });
     await Bun.write(path, '{"input":"a","skip":"exact"}\n');
-    await expect(evaluate("jsonl-must", { run: upper, cases: path, checks })).rejects.toThrow(
-      `${path}:1: "skip" must be an array of check names`,
-    );
+    await expect(
+      runEvaluation({ name: "jsonl-must", task: upper, data: path, scorers: checks }),
+    ).rejects.toThrow(`${path}:1: "skip" must be an array of check names`);
   });
 
   test("bad allow, must and skip names are rejected", async () => {
-    const base = { run: upper, cases, checks };
-    await expect(evaluate("o", { ...base, allow: { exakt: 1 } })).rejects.toThrow(
-      'allow names unknown check "exakt"',
+    const base = { task: upper, data: cases, scorers: checks };
+    await expect(runEvaluation({ name: "o", ...base, allow: { exakt: 1 } })).rejects.toThrow(
+      'allow names unknown scorer "exakt"',
     );
-    await expect(evaluate("o", { ...base, allow: { exact: -1 } })).rejects.toThrow(
+    await expect(runEvaluation({ name: "o", ...base, allow: { exact: -1 } })).rejects.toThrow(
       "allow.exact must be a whole number >= 0",
     );
-    await expect(evaluate("o", { ...base, allow: { exact: { drop: 0.5 } } })).rejects.toThrow(
-      "allow.exact.drop must be a whole number >= 0",
-    );
     await expect(
-      evaluate("o", { ...base, allow: { exact: { misses: 1 } as never } }),
+      runEvaluation({ name: "o", ...base, allow: { exact: { drop: 0.5 } } }),
+    ).rejects.toThrow("allow.exact.drop must be a whole number >= 0");
+    await expect(
+      runEvaluation({ name: "o", ...base, allow: { exact: { misses: 1 } as never } }),
     ).rejects.toThrow('allow.exact has unknown "misses"');
     await expect(
-      evaluate("o", { ...base, cases: [{ name: "a", input: "a", must: ["nope"] }] }),
-    ).rejects.toThrow('case "a" must names unknown check "nope"');
+      runEvaluation({ name: "o", ...base, data: [{ name: "a", input: "a", must: ["nope"] }] }),
+    ).rejects.toThrow('case "a" must names unknown scorer "nope"');
     await expect(
-      evaluate("o", { ...base, cases: [{ name: "a", input: "a", skip: ["nope"] }] }),
-    ).rejects.toThrow('case "a" skip names unknown check "nope"');
+      runEvaluation({ name: "o", ...base, data: [{ name: "a", input: "a", skip: ["nope"] }] }),
+    ).rejects.toThrow('case "a" skip names unknown scorer "nope"');
     await expect(
-      evaluate("o", {
+      runEvaluation({
+        name: "o",
         ...base,
-        cases: [{ name: "a", input: "a", must: ["exact"], skip: ["exact"] }],
+        data: [{ name: "a", input: "a", must: ["exact"], skip: ["exact"] }],
       }),
     ).rejects.toThrow('case "a" both must and skip "exact"');
   });
@@ -387,9 +429,9 @@ describe("passing", () => {
 
 describe("compare and save", () => {
   const cases = [
-    { name: "a", input: "a", expect: "A" },
-    { name: "b", input: "b", expect: "B" },
-    { name: "c", input: "c", expect: "nope" },
+    { name: "a", input: "a", expectedOutput: "A" },
+    { name: "b", input: "b", expectedOutput: "B" },
+    { name: "c", input: "c", expectedOutput: "nope" },
   ];
   const allow = { matches: { miss: 2 } };
   const swap = (input: string) => (input === "b" ? "?" : input === "c" ? "nope" : "A");
@@ -408,15 +450,22 @@ describe("compare and save", () => {
   }
 
   test("without either nothing is read or written", async () => {
-    await touchesNoFile(() => evaluate("upper", { run: upper, cases, allow }));
+    await touchesNoFile(() => runEvaluation({ name: "upper", task: upper, data: cases, allow }));
   });
 
   test("save writes the run, passing or failing", async () => {
     const path = join(await tempDir(), "upper.json");
-    await evaluate("upper", { run: upper, cases, allow, save: path, about: { model: "m-1" } });
+    await runEvaluation({
+      name: "upper",
+      task: upper,
+      data: cases,
+      allow,
+      save: path,
+      about: { model: "m-1" },
+    });
     expect(JSON.parse(await Bun.file(path).text())).toEqual({
-      format: 1,
-      eval: "upper",
+      format: 2,
+      name: "upper",
       about: { model: "m-1" },
       cases: {
         a: { matches: { pass: true, value: 1 } },
@@ -425,7 +474,7 @@ describe("compare and save", () => {
       },
     });
 
-    await failure(evaluate("upper", { run: upper, cases, save: path }));
+    await failure(runEvaluation({ name: "upper", task: upper, data: cases, save: path }));
     expect(JSON.parse(await Bun.file(path).text()).about).toBeUndefined();
   });
 
@@ -433,7 +482,13 @@ describe("compare and save", () => {
     const path = join(await tempDir(), "missing.json");
     const log = spyOn(console, "log").mockImplementation(() => {});
     try {
-      const report = await evaluate("upper", { run: swap, cases, allow, compare: path });
+      const report = await runEvaluation({
+        name: "upper",
+        task: swap,
+        data: cases,
+        allow,
+        compare: path,
+      });
       expect(report.checks["matches"]?.drop).toBeUndefined();
       expect(log).toHaveBeenCalledWith(`  no compare run at ${path}`);
     } finally {
@@ -441,19 +496,26 @@ describe("compare and save", () => {
     }
     expect(await Bun.file(path).exists()).toBe(false);
 
-    await evaluate("upper", { run: upper, cases, allow, save: path });
+    await runEvaluation({ name: "upper", task: upper, data: cases, allow, save: path });
     const stored = await Bun.file(path).text();
-    await evaluate("upper", { run: upper, cases, allow, compare: path });
-    await failure(evaluate("upper", { run: swap, cases, allow, compare: path }));
+    await runEvaluation({ name: "upper", task: upper, data: cases, allow, compare: path });
+    await failure(runEvaluation({ name: "upper", task: swap, data: cases, allow, compare: path }));
     expect(await Bun.file(path).text()).toBe(stored);
   });
 
   test("one path for both compares, then overwrites", async () => {
     const path = join(await tempDir(), "upper.last.json");
-    await evaluate("upper", { run: upper, cases, allow, compare: path, save: path });
+    await runEvaluation({
+      name: "upper",
+      task: upper,
+      data: cases,
+      allow,
+      compare: path,
+      save: path,
+    });
 
     const err = await failure(
-      evaluate("upper", { run: swap, cases, allow, compare: path, save: path }),
+      runEvaluation({ name: "upper", task: swap, data: cases, allow, compare: path, save: path }),
     );
     expect(err.report.changes).toEqual([
       { case: "b", check: "matches", change: "broke" },
@@ -464,32 +526,54 @@ describe("compare and save", () => {
     expect(err.message).toContain("b / matches");
     expect(JSON.parse(await Bun.file(path).text()).cases.b.matches.pass).toBe(false);
 
-    const again = await evaluate("upper", { run: swap, cases, allow, compare: path, save: path });
+    const again = await runEvaluation({
+      name: "upper",
+      task: swap,
+      data: cases,
+      allow,
+      compare: path,
+      save: path,
+    });
     expect(again.checks["matches"]?.drop).toBe(0);
   });
 
   test("an earlier report gates drops with no file", async () => {
-    const before = await evaluate("upper", { run: upper, cases, allow });
+    const before = await runEvaluation({ name: "upper", task: upper, data: cases, allow });
     await touchesNoFile(async () => {
-      const err = await failure(evaluate("upper", { run: swap, cases, allow, compare: before }));
+      const err = await failure(
+        runEvaluation({
+          name: "upper",
+          task: swap,
+          data: cases,
+          allow,
+          compare: before.experiment,
+        }),
+      );
       expect(err.report.checks["matches"]).toMatchObject({ drop: 1, ok: false });
-      const within = await evaluate("upper", {
-        run: swap,
-        cases,
+      const within = await runEvaluation({
+        name: "upper",
+        task: swap,
+        data: cases,
         allow: { matches: { miss: 1, drop: 1 } },
-        compare: before,
+        compare: before.experiment,
       });
       expect(within.ok).toBe(true);
     });
-    await expect(evaluate("other", { run: upper, cases, allow, compare: before })).rejects.toThrow(
-      'compare is a report of eval "upper"',
-    );
+    await expect(
+      runEvaluation({ name: "other", task: upper, data: cases, allow, compare: before.experiment }),
+    ).rejects.toThrow('compare is an experiment of "upper"');
   });
 
   test("added and removed cases are reported, not counted as drops", async () => {
-    const before = await evaluate("upper", { run: upper, cases, allow });
-    const changed = [...cases.slice(1), { name: "d", input: "d", expect: "nope" }];
-    const report = await evaluate("upper", { run: upper, cases: changed, allow, compare: before });
+    const before = await runEvaluation({ name: "upper", task: upper, data: cases, allow });
+    const changed = [...cases.slice(1), { name: "d", input: "d", expectedOutput: "nope" }];
+    const report = await runEvaluation({
+      name: "upper",
+      task: upper,
+      data: changed,
+      allow,
+      compare: before.experiment,
+    });
     expect(report.added).toEqual(["d"]);
     expect(report.removed).toEqual(["a"]);
     expect(report.checks["matches"]?.drop).toBe(0);
@@ -497,16 +581,16 @@ describe("compare and save", () => {
 
   test("refuses another eval's run and malformed files; reads 0.1.0 files", async () => {
     const path = join(await tempDir(), "b.json");
-    await evaluate("one", { run: upper, cases, allow, save: path });
-    await expect(evaluate("two", { run: upper, cases, allow, compare: path })).rejects.toThrow(
-      'stored run of eval "one", not "two"',
-    );
+    await runEvaluation({ name: "one", task: upper, data: cases, allow, save: path });
+    await expect(
+      runEvaluation({ name: "two", task: upper, data: cases, allow, compare: path }),
+    ).rejects.toThrow('stored experiment "one", not "two"');
     const old = { ...JSON.parse(await Bun.file(path).text()), passRate: 0.667 };
     await Bun.write(path, JSON.stringify(old));
-    await evaluate("one", { run: upper, cases, allow, compare: path });
-    await Bun.write(path, JSON.stringify({ format: 2 }));
-    await expect(evaluate("one", { run: upper, cases, allow, compare: path })).rejects.toThrow(
-      "unknown format 2",
-    );
+    await runEvaluation({ name: "one", task: upper, data: cases, allow, compare: path });
+    await Bun.write(path, JSON.stringify({ format: 1, name: "one", cases: {} }));
+    await expect(
+      runEvaluation({ name: "one", task: upper, data: cases, allow, compare: path }),
+    ).rejects.toThrow("expected 2");
   });
 });

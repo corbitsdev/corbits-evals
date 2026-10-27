@@ -4,7 +4,12 @@ import type { Trace } from "./runs.js";
 import { withTimeout } from "./timeout.js";
 import type { CaseResult, Outcome, Run } from "./types.js";
 
-export type NamedCase<I, E> = { name: string; input: I; expect?: E; skip?: readonly string[] };
+export type NamedCase<I, E> = {
+  name: string;
+  input: I;
+  expectedOutput?: E;
+  skip?: readonly string[];
+};
 
 /** String and `ask` checks Jev answers in one call per attempt. */
 export type JevGroup = { judge: Judge; checks: Record<string, Ask | Sentence | string> };
@@ -42,14 +47,21 @@ export async function runOnce<I, O, E>(
     }, timeoutMs);
   });
   try {
-    const trace = await Promise.race([spec.run(evalCase.input, controller.signal), expiry]);
+    const pending = spec.run(evalCase.input, controller.signal);
+    // Timeout settles this race while an aborted turn may still be draining.
+    // Observe that later rejection so it is not unhandled.
+    void pending.then(
+      () => {},
+      () => {},
+    );
+    const trace = await Promise.race([pending, expiry]);
     const run: Run<I, O, E> = {
       input: evalCase.input,
       output: trace.output,
       steps: trace.steps,
       ms: Date.now() - started,
     };
-    if (evalCase.expect !== undefined) run.expect = evalCase.expect;
+    if (evalCase.expectedOutput !== undefined) run.expectedOutput = evalCase.expectedOutput;
     return run;
   } finally {
     clearTimeout(timer);
@@ -168,7 +180,7 @@ async function runCase<I, O, E>(
     pass: error === undefined && Object.values(checks).every((o) => o.pass),
     checks,
   };
-  if (evalCase.expect !== undefined) result.expect = evalCase.expect;
+  if (evalCase.expectedOutput !== undefined) result.expectedOutput = evalCase.expectedOutput;
   if (last !== undefined) result.output = last.output;
   if (error !== undefined) result.error = error;
   return result;

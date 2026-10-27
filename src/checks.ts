@@ -27,7 +27,33 @@ export function toOutcome(name: string, raw: unknown): Outcome {
   };
 }
 
-/** Output deep-equals expect, or one field of each (a key or an accessor). */
+/** Case-insensitive substring. Value is 1 or 0. Strings only; no coercion. */
+export function includes(): CheckFn<unknown, unknown, unknown> {
+  return ({ output, expectedOutput }) => {
+    if (typeof output !== "string" || typeof expectedOutput !== "string") {
+      return {
+        pass: false,
+        value: 0,
+        explanation: "includes needs string output and expectedOutput",
+      };
+    }
+    const needle = collapsed(expectedOutput);
+    if (needle.length === 0) {
+      return { pass: false, value: 0, explanation: "includes needle is empty" };
+    }
+    const pass = collapsed(output).includes(needle);
+    return pass
+      ? { pass: true, value: 1 }
+      : { pass: false, value: 0, explanation: "output does not include the expected text" };
+  };
+}
+
+/** NFKC, trim, collapse internal whitespace, then lowercase. */
+function collapsed(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** Output deep-equals expectedOutput, or one field of each (a key or an accessor). */
 export function matches<T = unknown>(
   field?: string | ((value: T) => unknown),
 ): CheckFn<unknown, T, T> {
@@ -38,10 +64,11 @@ export function matches<T = unknown>(
       ? (value as Record<string, unknown>)[field]
       : undefined;
   };
-  return ({ output, expect }) => {
-    if (expect === undefined) return { pass: false, value: 0, explanation: "case has no expect" };
+  return ({ output, expectedOutput }) => {
+    if (expectedOutput === undefined)
+      return { pass: false, value: 0, explanation: "case has no expectedOutput" };
     const got = get(output);
-    const want = get(expect);
+    const want = get(expectedOutput);
     if (Bun.deepEquals(got, want)) return true;
     return {
       pass: false,
@@ -73,7 +100,7 @@ export function fitsSchema(schema: StandardSchema): CheckFn {
   };
 }
 
-/** Fixed words, or words picked per case (e.g. from `expect`). */
+/** Fixed words, or words picked per case (e.g. from `expectedOutput`). */
 export type Words<I = unknown, O = unknown, E = unknown> =
   | readonly string[]
   | ((run: Run<I, O, E>) => readonly string[]);
@@ -154,6 +181,13 @@ export function ranSteps(names: readonly string[], options: AtLeast = {}): Check
     const actual = stepNames(run).sort();
     const explanation = `expected [${expected.join(", ")}], got [${actual.join(", ")}]`;
     if (expected.length === 0) {
+      if (run.steps.length === 0) {
+        return {
+          pass: false,
+          value: 0,
+          explanation: "an empty step list is not an observed empty tool path",
+        };
+      }
       return { pass: actual.length === 0, value: actual.length === 0 ? 1 : 0, explanation };
     }
     const counts = new Map<string, number>();

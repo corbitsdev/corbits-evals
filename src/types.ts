@@ -1,3 +1,5 @@
+import type { Experiment } from "./reports.js";
+
 export type Step = {
   name: string;
   kind: "llm" | "tool" | "step";
@@ -10,7 +12,7 @@ export type Case<I = unknown, E = unknown> = {
   /** Keys the case in reports and compared runs. Defaults to the input. */
   name?: string;
   input: I;
-  expect?: E;
+  expectedOutput?: E;
   /** Checks that must pass on this case, whatever `allow` says. */
   must?: readonly string[];
   /** Checks this case is not run or counted for. */
@@ -21,7 +23,7 @@ export type Case<I = unknown, E = unknown> = {
 export type Run<I = unknown, O = unknown, E = unknown> = {
   input: I;
   output: O;
-  expect?: E;
+  expectedOutput?: E;
   steps: Step[];
   ms: number;
 };
@@ -49,7 +51,7 @@ export type CheckFn<I = unknown, O = unknown, E = unknown> = (
 export type CaseResult<I = unknown, O = unknown, E = unknown> = {
   name: string;
   input: I;
-  expect?: E;
+  expectedOutput?: E;
   output?: O;
   steps: Step[];
   /** Whole case: every attempt's run plus checks. */
@@ -90,7 +92,9 @@ export type Report<I = unknown, O = unknown, E = unknown> = {
   changes?: Change[];
   /** Cases only in this run. Present when comparing. */
   added?: string[];
-  /** Cases only in the compared run. Present when comparing. */
+  /** Cases only in the compared experiment. Present when comparing. */
   removed?: string[];
+  /** The persisted experiment for this run. */
+  experiment: Experiment;
   markdown(): string;
 };
