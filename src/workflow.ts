@@ -102,9 +102,19 @@ function isWorkflow(model: StepPrimitive | WorkflowDefinition): model is Workflo
   return "steps" in model && "stepOrder" in model;
 }
 
+/**
+ * `defineWorkflow` stamps a lone step that omits `input` with this selector.
+ * It is the same binding `judgeModel` forces, so it is not a custom input.
+ */
+function isStampedTriggerInput(input: NonNullable<StepPrimitive["input"]>): boolean {
+  return "from" in input && input.from === "trigger.payload" && Object.keys(input).length === 1;
+}
+
 function assertJudgeStep(step: StepPrimitive): void {
   if (step.kind !== "step") throw new Error("judgeModel: the only primitive must be a step");
-  if (step.input !== undefined) throw new Error("judgeModel: step must not set input");
+  if (step.input !== undefined && !isStampedTriggerInput(step.input)) {
+    throw new Error("judgeModel: step must not set input");
+  }
   if (step.inference !== undefined) throw new Error("judgeModel: step must not set inference");
   if (step.triggers !== undefined && step.triggers !== 1) {
     throw new Error("judgeModel: step triggers must be 1");
