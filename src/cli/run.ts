@@ -18,13 +18,14 @@ export default Cli.command({
     }
 
     try {
-      const report = await runEvaluation(spec);
+      const report = await runEvaluation(c.format === "json" ? { ...spec, quiet: true } : spec);
       return { name: report.name, ok: report.ok, passed: report.passed, total: report.total };
     } catch (cause) {
       if (cause instanceof EvalFailure) {
         return c.error({ code: "EVAL_FAILED", message: cause.message, exitCode: 1 });
       }
-      throw cause;
+      const message = cause instanceof Error ? cause.message : String(cause);
+      return c.error({ code: "EVAL_CONFIG", message, exitCode: 2 });
     }
   },
 });
