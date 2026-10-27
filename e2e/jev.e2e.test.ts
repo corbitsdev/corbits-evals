@@ -128,6 +128,28 @@ describe("sentence checks", () => {
     expect(outcome?.explanation).toContain("jev fallback");
     expect(outcome?.explanation).toContain("boom");
   });
+
+  test("a box decision fails closed and is not scored as a choice or a noul", async () => {
+    const box = {
+      type: "box",
+      box: { top: 0.1, bottom: 0.4, left: 0.2, right: 0.5 },
+      confidence: null,
+    };
+    const closed = {
+      pass: false,
+      value: 0,
+      explanation: "jev returned a box decision",
+    };
+    expect((await answered(box, question)).outcome).toEqual(closed);
+    expect(
+      (
+        await answered(
+          { ...box, confidence: 0.91 },
+          ask("Ready?", { options: { ready: "send", revise: "work" }, pass: "ready" }),
+        )
+      ).outcome,
+    ).toEqual(closed);
+  });
 });
 
 describe("batching", () => {

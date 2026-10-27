@@ -240,7 +240,10 @@ export function checkThresholds(check: Ask | Sentence | string): void {
 }
 
 /** The decision's full distribution; the answer never carries it alone. */
-function dist(decision: Decision): { probabilities: Record<string, number>; confidence?: number } {
+function dist(decision: Exclude<Decision, { type: "box" }>): {
+  probabilities: Record<string, number>;
+  confidence?: number;
+} {
   if (decision.type === "noul") {
     const yes = r3(decision.noul);
     return { probabilities: { yes, no: r3(1 - decision.noul) } };
@@ -257,6 +260,8 @@ export function toOutcome(
   decision: Decision,
   judge: Judge,
 ): Outcome {
+  // A box locates a region. It has no distribution and is not a yes/no, choice, or score.
+  if (decision.type === "box") return failed("jev returned a box decision");
   const t = thresholdsFor(check, judge);
   const d = dist(decision);
   if (decision.type === "noul") {
