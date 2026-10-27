@@ -1,6 +1,6 @@
 {
   "name": "@corbits/evals",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Evals for agents and workflows in one runEvaluation call: code, Jev and helper scorers over JSONL or inline data, gated per scorer on allowed misses and drops.",
   "keywords": [
     "agents",
@@ -20,9 +20,10 @@
     "url": "git+https://github.com/corbitsdev/corbits-evals.git"
   },
   "bin": {
-    "corbits-eval": "./dist/cli/index.js"
+    "corbits-eval": "./bin/corbits-eval.js"
   },
   "files": [
+    "bin",
     "dist",
     "README.md",
     "LICENSE"
