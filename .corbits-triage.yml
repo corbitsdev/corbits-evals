@@ -1,49 +1,260 @@
 # Corbits Triage policy.
 rules:
   - check: max-files-changed
-    text: Flag pull requests over 30 files changed.
-    max: 30
-    reason: Set in the portal before the policy file.
+    text: Flag pull requests over 25 files changed.
+    max: 25
+    reason: Merged pull requests here touch 3 files at the median and 21 at the 90th percentile.
     evidence:
       - maintainer-stated
   - check: max-lines-changed
-    text: Flag pull requests over 5,000 lines changed.
-    max: 5000
-    reason: Set in the portal before the policy file.
+    text: Flag pull requests over 800 lines changed.
+    max: 800
+    reason: Merged pull requests here change 151 lines at the median and 747 at the 90th percentile.
     evidence:
       - maintainer-stated
   - check: focused
     text: Check the change is focused on one thing.
-    reason: Set in the portal before the policy file.
+    reason: A change that does several things is harder to review and to revert.
     evidence:
       - maintainer-stated
   - check: docs
     text: Check docs are updated when behavior changes.
-    reason: Set in the portal before the policy file.
+    reason: AGENTS.md asks for docs and tests to change alongside code.
     evidence:
       - maintainer-stated
-    enabled: false
   - check: linked-issue
     text: Require a linked issue from GitHub or Linear.
     tracker: either
-    reason: Set in the portal before the policy file.
+    reason: CONTRIBUTING.md says a pull request without a linked issue is closed.
     evidence:
       - maintainer-stated
   - check: no-merge-conflicts
     text: Flag merge conflicts with the base branch.
-    reason: Set in the portal before the policy file.
+    reason: A pull request with conflicts can't be merged as it is.
     evidence:
       - maintainer-stated
   - check: ci-green
     text: CI must pass before merge.
-    reason: Set in the portal before the policy file.
+    reason: A change is not ready until CI passes.
     evidence:
       - maintainer-stated
-  - check: no-forbidden-paths
-    text: Never accept changes to node_modules/**.
-    paths:
-      - node_modules/**
-    reason: Set in the portal before the policy file.
+  - check: sensitive-paths
+    text: Note changes to CI configuration and the lockfile.
+    groups:
+      ci:
+        level: medium
+        paths:
+          - .github/**
+      locks:
+        level: medium
+        paths:
+          - "**/bun.lock"
+    reason: CI and lockfile changes reach beyond the diff they show.
+    evidence:
+      - maintainer-stated
+  - check: risk
+    text: Ask about high-risk pull requests and label medium-risk ones.
+    reason: A large change with no test touched needs a maintainer's eye.
+    evidence:
+      - maintainer-stated
+  - check: hidden-content
+    text: Flag text hidden in the pull request.
+    reason: Hidden text can steer the rules a model judges.
+    evidence:
+      - maintainer-stated
+  - check: no-duplicate
+    text: Flag a pull request whose diff or commits match another open one.
+    reason: Two pull requests for the same change split one review.
+    evidence:
+      - maintainer-stated
+  - check: duplicates-open-pull-request
+    text: Ask when a pull request overlaps another open one.
+    reason: An overlapping pull request needs a person to pick which one goes in.
+    evidence:
+      - maintainer-stated
+  - check: conventional-commits
+    text: Titles and commits follow Conventional Commits.
+    reason: Every non-merge commit on main in the last 50 uses one of these types.
+    evidence:
+      - maintainer-stated
+  - id: no-ai-attribution
+    check: text
+    text: Titles, descriptions and commits carry no AI attribution.
+    fields: [title, description, commits]
+    failWhen: contains
+    phrases:
+      - "Co-Authored-By: Claude"
+      - "Claude-Session:"
+      - "claude.ai/code/session"
+      - "noreply@anthropic.com"
+      - "Generated with Claude"
+      - "Generated with [Claude"
+    onFail: ask
+    reason: Tool-generated trailers and footers don't belong in commits or descriptions.
+    evidence:
+      - maintainer-stated
+  - id: conventions
+    check: code-patterns
+    text: Added code follows the repository's conventions.
+    presets:
+      - convention
+    onFail: label
+    reason: Keeps added code free of invented fallbacks, nested ternaries, IIFEs and promise chains.
+    evidence:
+      - maintainer-stated
+  - id: invented-fallbacks
+    check: code-patterns
+    text: Added code handles a missing value instead of inventing an empty one.
+    patterns:
+      - id: more-invented-fallbacks
+        language: typescript
+        message: Invented fallback (an empty string, || [] or || 0); handle the missing value instead.
+        ignores:
+          [
+            "**/*.{test,spec}.*",
+            "**/{test,tests,Tests,__tests__}/**",
+            "**/*.*{Test,Tests}/**",
+          ]
+        rule:
+          any:
+            - pattern: $X || []
+            - all:
+                - any:
+                    - pattern: $X ?? ""
+                    - pattern: $X ?? ''
+                    - pattern: $X ?? ``
+                    - pattern: $X || ""
+                    - pattern: $X || ''
+                    - pattern: $X || ``
+                - not:
+                    any:
+                      - inside: { kind: template_substitution }
+                      - inside:
+                          {
+                            kind: binary_expression,
+                            has: { field: operator, regex: '^$' },
+                          }
+                      - inside:
+                          {
+                            kind: parenthesized_expression,
+                            inside:
+                              {
+                                kind: binary_expression,
+                                has: { field: operator, regex: '^$' },
+                              },
+                          }
+                      - has: { field: left, kind: subscript_expression }
+                      - has:
+                          {
+                            field: left,
+                            kind: call_expression,
+                            has:
+                              {
+                                field: function,
+                                regex: '\.(at|get|getAttribute)$',
+                              },
+                          }
+            - all:
+                - pattern: $X || 0
+                - not:
+                    any:
+                      - inside:
+                          {
+                            kind: binary_expression,
+                            has: { field: operator, regex: "^[-+*/%]$" },
+                          }
+                      - inside:
+                          {
+                            kind: parenthesized_expression,
+                            inside:
+                              {
+                                kind: binary_expression,
+                                has: { field: operator, regex: "^[-+*/%]$" },
+                              },
+                          }
+                      - inside: { kind: augmented_assignment_expression }
+      - id: more-invented-fallbacks
+        language: javascript
+        message: Invented fallback (an empty string, || [] or || 0); handle the missing value instead.
+        ignores:
+          [
+            "**/*.{test,spec}.*",
+            "**/{test,tests,Tests,__tests__}/**",
+            "**/*.*{Test,Tests}/**",
+          ]
+        rule:
+          any:
+            - pattern: $X || []
+            - all:
+                - any:
+                    - pattern: $X ?? ""
+                    - pattern: $X ?? ''
+                    - pattern: $X ?? ``
+                    - pattern: $X || ""
+                    - pattern: $X || ''
+                    - pattern: $X || ``
+                - not:
+                    any:
+                      - inside: { kind: template_substitution }
+                      - inside:
+                          {
+                            kind: binary_expression,
+                            has: { field: operator, regex: '^$' },
+                          }
+                      - inside:
+                          {
+                            kind: parenthesized_expression,
+                            inside:
+                              {
+                                kind: binary_expression,
+                                has: { field: operator, regex: '^$' },
+                              },
+                          }
+                      - has: { field: left, kind: subscript_expression }
+                      - has:
+                          {
+                            field: left,
+                            kind: call_expression,
+                            has:
+                              {
+                                field: function,
+                                regex: '\.(at|get|getAttribute)$',
+                              },
+                          }
+            - all:
+                - pattern: $X || 0
+                - not:
+                    any:
+                      - inside:
+                          {
+                            kind: binary_expression,
+                            has: { field: operator, regex: "^[-+*/%]$" },
+                          }
+                      - inside:
+                          {
+                            kind: parenthesized_expression,
+                            inside:
+                              {
+                                kind: binary_expression,
+                                has: { field: operator, regex: "^[-+*/%]$" },
+                              },
+                          }
+                      - inside: { kind: augmented_assignment_expression }
+    onFail: label
+    reason: A fallback belongs only where a real default exists.
+    evidence:
+      - maintainer-stated
+  - id: no-any
+    check: code-patterns
+    text: Added code uses no any type.
+    patterns:
+      - id: no-any
+        language: typescript
+        message: "`any` turns type checking off; name the type, or take unknown and narrow it."
+        ignores: ["**/*.{test,spec}.*"]
+        rule: { kind: predefined_type, regex: "^any$" }
+    onFail: ask
+    reason: Callers of the eval API rely on its types, and any turns them off.
     evidence:
       - maintainer-stated
 actions:
@@ -53,13 +264,17 @@ actions:
         author:
           - users:
               - thegreataxios
+              - brianjfox
     - do: request-review
       target:
-        to: codeowners
+        to: users
+        users:
+          - thegreataxios
       when:
         author:
           - external
   fail:
+    - do: close
     - do: request-changes
   unsure:
     - do: assign
