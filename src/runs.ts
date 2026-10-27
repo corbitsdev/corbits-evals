@@ -220,7 +220,7 @@ async function collect(
   iterator: AsyncIterator<StreamEvent>,
   first: Promise<IteratorResult<StreamEvent>>,
   steps: Step[],
-  send: Promise<void>,
+  send: Promise<unknown>,
   signal: AbortSignal,
 ): Promise<boolean> {
   let saw = false;
@@ -306,7 +306,8 @@ async function sendAgent<O>(
     try {
       const first = await discardBuffered(iterator);
       let settled: { ok: true; res: AgentSendResult } | { ok: false; error: unknown } | undefined;
-      const send = agent.send(input, { signal }).then(
+      const pending = agent.send(input, { signal });
+      const send = pending.then(
         (res) => {
           settled = { ok: true, res };
         },
@@ -314,7 +315,7 @@ async function sendAgent<O>(
           settled = { ok: false, error };
         },
       );
-      const saw = await collect(iterator, first.pending, steps, send, signal);
+      const saw = await collect(iterator, first.pending, steps, pending, signal);
       await send;
       if (settled === undefined || !settled.ok) {
         throw settled === undefined ? new Error("agent send did not settle") : settled.error;

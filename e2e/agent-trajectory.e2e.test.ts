@@ -301,7 +301,11 @@ describe("agent trajectory", () => {
       stream: true,
       onSend: (input, emit, signal) => {
         if (input !== "slow") {
-          return Promise.resolve({ type: "reply", reply: "found", turn: { model: "stub" } });
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              resolve({ type: "reply", reply: "found", turn: { model: "stub" } });
+            }, 80);
+          });
         }
         return new Promise((_resolve, reject) => {
           const abort = (): void => {
@@ -312,7 +316,7 @@ describe("agent trajectory", () => {
                 data: { call: { id: "late", name: "search", arguments: { q: "slow" } } },
               });
               emit({ type: "connector.reply", data: { content: "late" } });
-            }, 20);
+            }, 30);
           };
           if (signal.aborted) abort();
           else signal.addEventListener("abort", abort, { once: true });
