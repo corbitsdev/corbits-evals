@@ -3,7 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineAgent } from "@intx/agent";
-import { defineWorkflow, step, type StepInvoker, type WorkflowDefinition } from "@intx/workflow";
+import {
+  childWorkflow,
+  defineWorkflow,
+  map,
+  step,
+  type StepInvoker,
+  type WorkflowDefinition,
+} from "@intx/workflow";
 
 import {
   ask,
@@ -606,7 +613,16 @@ describe("judgeModel", () => {
     );
     expect(() =>
       judgeModel({
-        model: step({ agent, input: { from: "trigger.payload" } }),
+        model: step({ agent, input: { from: "steps.other.output" } }),
+        invokeStep,
+      }),
+    ).toThrow("must not set input");
+    expect(() =>
+      judgeModel({
+        model: defineWorkflow({
+          id: "custom-input",
+          steps: { only: step({ agent, input: { literal: "fixed" } }) },
+        }),
         invokeStep,
       }),
     ).toThrow("must not set input");
@@ -625,6 +641,20 @@ describe("judgeModel", () => {
       },
     });
     expect(() => judgeModel({ model: two, invokeStep })).toThrow("exactly one step");
+    const mapped = defineWorkflow({
+      id: "mapped",
+      steps: {
+        fan: map({ over: { from: "trigger.payload" }, step: step({ agent }) }),
+      },
+    });
+    expect(() => judgeModel({ model: mapped, invokeStep })).toThrow("must be a step");
+    const child = defineWorkflow({
+      id: "parent",
+      steps: {
+        inner: childWorkflow({ definition: defineWorkflow({ id: "inner", agent }) }),
+      },
+    });
+    expect(() => judgeModel({ model: child, invokeStep })).toThrow("must be a step");
     const empty = {
       id: "empty",
       triggers: [{ type: "manual" }],
@@ -652,5 +682,32 @@ describe("judgeModel", () => {
         invokeStep: undefined as unknown as StepInvoker,
       }),
     ).toThrow("needs invokeStep");
+  });
+
+  test("a one-step workflow is invoked once with the case payload", async () => {
+    const question = "Is this reply ready to send to the customer?";
+    const payload = {
+      state: { input: "refund?", output: "reply to refund?", expectedOutput: "yes" },
+      questions: { judged: { type: "noul", instructions: question } },
+    };
+    const forms = [
+      step({ agent }),
+      defineWorkflow({ id: "plural", steps: { only: step({ agent }) } }),
+      defineWorkflow({
+        id: "explicit",
+        steps: { only: step({ agent, input: { from: "trigger.payload" } }) },
+      }),
+      defineWorkflow({ id: "singular", agent }),
+    ];
+    for (const model of forms) {
+      const bodies: unknown[] = [];
+      const seen: StepInvoker = async (request) => {
+        bodies.push(request.input);
+        return { output: { decisions: [{ id: "judged", type: "noul", noul: 0.9 }] } };
+      };
+      const { outcome } = await judged(question, judgeModel({ model, invokeStep: seen }));
+      expect(outcome?.pass).toBe(true);
+      expect(bodies).toEqual([payload]);
+    }
   });
 });
