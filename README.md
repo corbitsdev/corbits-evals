@@ -186,13 +186,13 @@ A spec is the object `runEvaluation` accepts (`name`, `data`, `task`,
 
 Exit codes:
 
-| code | when                                                               |
-| ---- | ------------------------------------------------------------------ |
-| 0    | the run passed its gate                                            |
-| 1    | the evaluation failed its gate                                     |
-| 2    | the file is missing, the import failed, or there is no spec export |
+| code | when                                                                                           |
+| ---- | ---------------------------------------------------------------------------------------------- |
+| 0    | the run passed its gate                                                                        |
+| 1    | the evaluation failed its gate                                                                 |
+| 2    | the file is missing, the import failed, there is no spec export, or the evaluation did not run |
 
-`--format json` (and `--json`) come from incur and print the result as JSON.
+`--format json` (and `--json`) come from incur and print only that result as JSON on stdout, with no human summary. Exit 1 is only a failed gate (`EVAL_FAILED`). Config that stops the run before it starts, such as empty `data` or a string or `ask` scorer with no `judge.invoke`, exits 2.
 
 ## Calibrating
 

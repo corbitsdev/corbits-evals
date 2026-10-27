@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { Evaluation } from "./evaluation.js";
+import { TRACE } from "./runs.js";
 
 /** A missing file, a failed import, or a module with no evaluation spec. */
 export class EvalFileError extends Error {
@@ -15,8 +16,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/** A task `toTraced` can run: a function, `workflow()`, or an agent with `send`. */
+function isRunnable(value: unknown): boolean {
+  if (typeof value === "function") return true;
+  if (!isRecord(value)) return false;
+  if (TRACE in value) return true;
+  return typeof value["send"] === "function";
+}
+
+function isData(value: unknown): boolean {
+  return Array.isArray(value) || typeof value === "string";
+}
+
 function isSpec(value: unknown): value is Evaluation<unknown, unknown, unknown> {
-  return isRecord(value) && typeof value["name"] === "string" && "data" in value && "task" in value;
+  return (
+    isRecord(value) &&
+    typeof value["name"] === "string" &&
+    isData(value["data"]) &&
+    isRunnable(value["task"])
+  );
 }
 
 function isZeroArg(value: unknown): value is () => unknown {
