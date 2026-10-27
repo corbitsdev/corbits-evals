@@ -204,7 +204,12 @@ Exit codes:
 `@corbits/evals/workflow` also exports four prebuilt one-step judges. Each
 takes a pinned `{ provider, model }` and does not call a model by itself:
 `faithfulness`, `answerRelevancy`, `correctness`, and `trajectoryAccuracy`.
-Pair them with `judgeModel` when you want those rubrics run. `includes` stays
+Each returns `{ definition, payload, failure }`. Run `definition` with
+`workflow`, using `payload(run)` as the trigger. An outcome from `payload`
+is the result; `failure` is the closed miss when the run cannot be judged.
+`parsePrebuilt(id, output)` reads the step's category or score JSON.
+`judgeModel` expects `{ decisions }` or `{ fallback }` and does not run
+these rubrics. `includes` stays
 a code check on the root package.
 
 ## Breaking changes
