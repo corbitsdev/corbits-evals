@@ -102,8 +102,10 @@ space cannot absorb — those fail closed by design.
 - **Agent**: an `@intx/agent` Agent, detected by `send`. Input is sent
   as a message; output is the reply. When the agent has `stream()`, steps
   are recorded from that stream (`inference.done` as `llm`, `tool.start` /
-  `tool.done` as `tool`). A reply-only send without `stream` leaves `steps`
-  empty, which does not satisfy `ranSteps([])`.
+  `tool.done` as `tool`). A policy deny emits `tool.done` without
+  `tool.start`; the tool is still recorded when `inference.tool_call.end`
+  or the assistant `tool_call` block names it. A reply-only send without
+  `stream` leaves `steps` empty, which does not satisfy `ranSteps([])`.
 - **Workflow**: `workflow(definition, { invokeStep })` from
   `@corbits/evals/workflow`. A definition cannot run locally without a
   step invoker, and the root never loads `@intx/workflow`, so a bare

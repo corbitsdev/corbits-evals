@@ -47,7 +47,14 @@ export async function runOnce<I, O, E>(
     }, timeoutMs);
   });
   try {
-    const trace = await Promise.race([spec.run(evalCase.input, controller.signal), expiry]);
+    const pending = spec.run(evalCase.input, controller.signal);
+    // Timeout settles this race while an aborted turn may still be draining.
+    // Observe that later rejection so it is not unhandled.
+    void pending.then(
+      () => {},
+      () => {},
+    );
+    const trace = await Promise.race([pending, expiry]);
     const run: Run<I, O, E> = {
       input: evalCase.input,
       output: trace.output,
