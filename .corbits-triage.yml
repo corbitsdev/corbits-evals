@@ -3,12 +3,14 @@ rules:
   - check: max-files-changed
     text: Flag pull requests over 25 files changed.
     max: 25
+    onFail: label
     reason: Merged pull requests here touch 3 files at the median and 21 at the 90th percentile.
     evidence:
       - maintainer-stated
   - check: max-lines-changed
     text: Flag pull requests over 800 lines changed.
     max: 800
+    onFail: label
     reason: Merged pull requests here change 151 lines at the median and 747 at the 90th percentile.
     evidence:
       - maintainer-stated
