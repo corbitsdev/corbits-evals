@@ -74,27 +74,74 @@ function joinedText(turn: unknown): { name: string; output: string } {
   return { name, output: parts.join("") };
 }
 
-function recordEvent(event: StreamEvent, steps: Step[], tools: Map<string, Step>): boolean {
+type KnownCall = { name: string; input: unknown; step?: Step };
+
+function rememberCall(
+  tools: Map<string, KnownCall>,
+  id: string,
+  name: string,
+  input: unknown,
+): void {
+  if (name.length === 0 || tools.has(id)) return;
+  tools.set(id, { name, input });
+}
+
+/** Names a blocked call can carry without `tool.start`. */
+function rememberTurnCalls(turn: unknown, tools: Map<string, KnownCall>): void {
+  if (!isRecord(turn) || !Array.isArray(turn.content)) return;
+  for (const block of turn.content) {
+    if (!isRecord(block) || block.type !== "tool_call") continue;
+    if (typeof block.id !== "string" || typeof block.name !== "string") continue;
+    rememberCall(tools, block.id, block.name, block.arguments);
+  }
+}
+
+function toolName(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function recordEvent(event: StreamEvent, steps: Step[], tools: Map<string, KnownCall>): boolean {
+  if (event.type === "inference.tool_call.end") {
+    const data = isRecord(event.data) ? event.data : undefined;
+    if (data === undefined || typeof data.callId !== "string") return false;
+    const name = toolName(data.name);
+    if (name === undefined) return false;
+    rememberCall(tools, data.callId, name, data.arguments);
+    return false;
+  }
   if (event.type === "inference.done") {
     const turn = isRecord(event.data) ? event.data.turn : undefined;
+    rememberTurnCalls(turn, tools);
     const text = joinedText(turn);
     steps.push({ name: text.name, kind: "llm", output: text.output });
     return true;
   }
   if (event.type === "tool.start") {
     const call = isRecord(event.data) ? event.data.call : undefined;
-    if (!isRecord(call) || typeof call.name !== "string") return false;
-    const step: Step = { name: call.name, kind: "tool", input: call.arguments };
+    if (!isRecord(call)) return false;
+    const id = typeof call.id === "string" ? call.id : undefined;
+    const known = id === undefined ? undefined : tools.get(id);
+    const name = toolName(call.name) ?? known?.name;
+    if (name === undefined) return false;
+    if (known?.step !== undefined) return true;
+    const step: Step = { name, kind: "tool", input: call.arguments ?? known?.input };
     steps.push(step);
-    if (typeof call.id === "string") tools.set(call.id, step);
+    if (id !== undefined) tools.set(id, { name, input: step.input, step });
     return true;
   }
   if (event.type === "tool.done") {
     const result = isRecord(event.data) ? event.data.result : undefined;
     if (!isRecord(result) || typeof result.callId !== "string") return false;
-    const step = tools.get(result.callId);
-    if (step === undefined) return false;
+    const known = tools.get(result.callId);
+    if (known === undefined) return false;
+    let step = known.step;
+    if (step === undefined) {
+      step = { name: known.name, kind: "tool", input: known.input };
+      steps.push(step);
+      known.step = step;
+    }
     step.output = "content" in result ? result.content : result;
+    return true;
   }
   return false;
 }
@@ -158,21 +205,35 @@ async function nextEventOrIdle(
   }
 }
 
+/** The reactor settles the in-flight send on these, then stops this turn. */
+function isTurnEnd(event: StreamEvent): boolean {
+  if (
+    event.type === "connector.reply" ||
+    event.type === "reactor.gate.blocked" ||
+    event.type === "reactor.done"
+  ) {
+    return true;
+  }
+  return event.type === "reactor.error" && isRecord(event.data) && event.data.fatal === true;
+}
 async function collect(
   iterator: AsyncIterator<StreamEvent>,
   first: Promise<IteratorResult<StreamEvent>>,
   steps: Step[],
   send: Promise<void>,
+  signal: AbortSignal,
 ): Promise<boolean> {
   let saw = false;
-  const tools = new Map<string, Step>();
+  const tools = new Map<string, KnownCall>();
   let sendSettled = false;
+  let sendFailed = false;
   const mark = send.then(
     () => {
       sendSettled = true;
     },
     () => {
       sendSettled = true;
+      sendFailed = true;
     },
   );
   const note = (event: StreamEvent): void => {
@@ -189,7 +250,19 @@ async function collect(
     note(winner.result.value);
     next = iterator.next();
   }
+  // Abort rejects `send` while the reactor keeps emitting. Hold this
+  // subscription until the turn ends so a late tool cannot be recorded
+  // on the next case, where it would also suppress that case's model step.
+  let holdForTurn = sendFailed && signal.aborted;
   for (;;) {
+    if (holdForTurn) {
+      const result = await next;
+      if (result.done === true) break;
+      note(result.value);
+      next = iterator.next();
+      if (isTurnEnd(result.value)) holdForTurn = false;
+      continue;
+    }
     const winner = await nextEventOrIdle(next);
     if (winner.idle) {
       const ready = await takeReady(next);
@@ -241,7 +314,7 @@ async function sendAgent<O>(
           settled = { ok: false, error };
         },
       );
-      const saw = await collect(iterator, first.pending, steps, send);
+      const saw = await collect(iterator, first.pending, steps, send, signal);
       await send;
       if (settled === undefined || !settled.ok) {
         throw settled === undefined ? new Error("agent send did not settle") : settled.error;

@@ -10,7 +10,7 @@ type SendResult =
 
 function createStub(options: {
   stream: boolean;
-  onSend: (input: string, emit: (event: Event) => void) => Promise<SendResult>;
+  onSend: (input: string, emit: (event: Event) => void, signal: AbortSignal) => Promise<SendResult>;
 }): { agent: AgentLike; maxConsumers: () => number } {
   let consumers = 0;
   let maxConsumers = 0;
@@ -24,7 +24,8 @@ function createStub(options: {
   }
 
   const agent: AgentLike = {
-    send: (content) => options.onSend(content, emit),
+    send: (content, opts) =>
+      options.onSend(content, emit, opts?.signal ?? new AbortController().signal),
   };
   if (options.stream) {
     agent.stream = () => ({
@@ -293,5 +294,115 @@ describe("agent trajectory", () => {
     await pendingA;
     await expect(pendingB).rejects.toThrow("run aborted before send");
     expect(sends).toBe(1);
+  });
+
+  test("an aborted turn's late tool does not land on the next case", async () => {
+    const { agent } = createStub({
+      stream: true,
+      onSend: (input, emit, signal) => {
+        if (input !== "slow") {
+          return Promise.resolve({ type: "reply", reply: "found", turn: { model: "stub" } });
+        }
+        return new Promise((_resolve, reject) => {
+          const abort = (): void => {
+            reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
+            setTimeout(() => {
+              emit({
+                type: "tool.start",
+                data: { call: { id: "late", name: "search", arguments: { q: "slow" } } },
+              });
+              emit({ type: "connector.reply", data: { content: "late" } });
+            }, 20);
+          };
+          if (signal.aborted) abort();
+          else signal.addEventListener("abort", abort, { once: true });
+        });
+      },
+    });
+    const err = await failure(
+      runEvaluation({
+        name: "abort-then-lookup",
+        task: agent,
+        concurrency: 1,
+        timeout: 200,
+        data: [
+          { name: "slow", input: "slow" },
+          { name: "lookup", input: "lookup" },
+        ],
+        scorers: { none: ranSteps([]), search: ranSteps(["search"]) },
+      }),
+    );
+    const lookup = err.report.cases.find((c) => c.name === "lookup");
+    expect(err.report.cases[0]?.error).toContain("timed out");
+    expect(lookup?.error).toBeUndefined();
+    expect(lookup?.steps).toEqual([{ name: "stub", kind: "llm", output: "found" }]);
+    expect(lookup?.checks["none"]?.pass).toBe(true);
+    expect(lookup?.checks["search"]?.pass).toBe(false);
+  });
+
+  test("a policy deny records the tool name without tool.start", async () => {
+    const { agent } = createStub({
+      stream: true,
+      onSend: async (input, emit) => {
+        if (input === "from-block") {
+          emit({
+            type: "inference.done",
+            data: {
+              turn: {
+                model: "stub",
+                content: [
+                  { type: "text", text: "no" },
+                  { type: "tool_call", id: "c1", name: "search", arguments: { q: input } },
+                ],
+              },
+            },
+          });
+        } else {
+          emit({
+            type: "inference.done",
+            data: { turn: { model: "stub", content: [{ type: "text", text: "no" }] } },
+          });
+          emit({
+            type: "inference.tool_call.end",
+            data: { callId: "c1", name: "search", arguments: { q: input } },
+          });
+          emit({
+            type: "inference.tool_call.end",
+            data: { callId: "empty", name: "", arguments: {} },
+          });
+        }
+        emit({
+          type: "tool.done",
+          data: { result: { callId: "nameless", content: "no name" } },
+        });
+        emit({
+          type: "tool.done",
+          data: { result: { callId: "empty", content: "skip" } },
+        });
+        emit({
+          type: "tool.done",
+          data: { result: { callId: "c1", content: "blocked", isError: true } },
+        });
+        return { type: "reply", reply: "no", turn: { model: "stub" } };
+      },
+    });
+    const report = await runEvaluation({
+      name: "policy-deny",
+      task: agent,
+      data: [
+        { name: "from-end", input: "from-end" },
+        { name: "from-block", input: "from-block" },
+      ],
+      scorers: { ran: ranSteps(["search"]), none: ranSteps([]) },
+      allow: { none: 2 },
+    });
+    for (const evalCase of report.cases) {
+      expect(evalCase.steps).toEqual([
+        { name: "stub", kind: "llm", output: "no" },
+        { name: "search", kind: "tool", input: { q: evalCase.input }, output: "blocked" },
+      ]);
+      expect(evalCase.checks["ran"]?.pass).toBe(true);
+      expect(evalCase.checks["none"]?.pass).toBe(false);
+    }
   });
 });
