@@ -276,7 +276,6 @@ actions:
         author:
           - external
   fail:
-    - do: close
     - do: request-changes
   unsure:
     - do: assign
