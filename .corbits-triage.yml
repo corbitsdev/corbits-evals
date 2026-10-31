@@ -112,11 +112,7 @@ rules:
         language: typescript
         message: Invented fallback (an empty string, || [] or || 0); handle the missing value instead.
         ignores:
-          [
-            "**/*.{test,spec}.*",
-            "**/{test,tests,Tests,__tests__}/**",
-            "**/*.*{Test,Tests}/**",
-          ]
+          ["**/*.{test,spec}.*", "**/{test,tests,Tests,__tests__}/**", "**/*.*{Test,Tests}/**"]
         rule:
           any:
             - pattern: $X || []
@@ -131,40 +127,26 @@ rules:
                 - not:
                     any:
                       - inside: { kind: template_substitution }
-                      - inside:
-                          {
-                            kind: binary_expression,
-                            has: { field: operator, regex: '^$' },
-                          }
+                      - inside: { kind: binary_expression, has: { field: operator, regex: "^$" } }
                       - inside:
                           {
                             kind: parenthesized_expression,
                             inside:
-                              {
-                                kind: binary_expression,
-                                has: { field: operator, regex: '^$' },
-                              },
+                              { kind: binary_expression, has: { field: operator, regex: "^$" } },
                           }
                       - has: { field: left, kind: subscript_expression }
                       - has:
                           {
                             field: left,
                             kind: call_expression,
-                            has:
-                              {
-                                field: function,
-                                regex: '\.(at|get|getAttribute)$',
-                              },
+                            has: { field: function, regex: '\.(at|get|getAttribute)$' },
                           }
             - all:
                 - pattern: $X || 0
                 - not:
                     any:
                       - inside:
-                          {
-                            kind: binary_expression,
-                            has: { field: operator, regex: "^[-+*/%]$" },
-                          }
+                          { kind: binary_expression, has: { field: operator, regex: "^[-+*/%]$" } }
                       - inside:
                           {
                             kind: parenthesized_expression,
@@ -179,11 +161,7 @@ rules:
         language: javascript
         message: Invented fallback (an empty string, || [] or || 0); handle the missing value instead.
         ignores:
-          [
-            "**/*.{test,spec}.*",
-            "**/{test,tests,Tests,__tests__}/**",
-            "**/*.*{Test,Tests}/**",
-          ]
+          ["**/*.{test,spec}.*", "**/{test,tests,Tests,__tests__}/**", "**/*.*{Test,Tests}/**"]
         rule:
           any:
             - pattern: $X || []
@@ -198,40 +176,26 @@ rules:
                 - not:
                     any:
                       - inside: { kind: template_substitution }
-                      - inside:
-                          {
-                            kind: binary_expression,
-                            has: { field: operator, regex: '^$' },
-                          }
+                      - inside: { kind: binary_expression, has: { field: operator, regex: "^$" } }
                       - inside:
                           {
                             kind: parenthesized_expression,
                             inside:
-                              {
-                                kind: binary_expression,
-                                has: { field: operator, regex: '^$' },
-                              },
+                              { kind: binary_expression, has: { field: operator, regex: "^$" } },
                           }
                       - has: { field: left, kind: subscript_expression }
                       - has:
                           {
                             field: left,
                             kind: call_expression,
-                            has:
-                              {
-                                field: function,
-                                regex: '\.(at|get|getAttribute)$',
-                              },
+                            has: { field: function, regex: '\.(at|get|getAttribute)$' },
                           }
             - all:
                 - pattern: $X || 0
                 - not:
                     any:
                       - inside:
-                          {
-                            kind: binary_expression,
-                            has: { field: operator, regex: "^[-+*/%]$" },
-                          }
+                          { kind: binary_expression, has: { field: operator, regex: "^[-+*/%]$" } }
                       - inside:
                           {
                             kind: parenthesized_expression,
